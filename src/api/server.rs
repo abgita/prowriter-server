@@ -2,6 +2,7 @@ use std::convert::Infallible;
 use bytes::Bytes;
 use std::sync::{Arc};
 use serde::{Serialize};
+use serde_json::json;
 use tokio::sync::{RwLock};
 use warp::{Filter, Rejection, Reply, reply};
 use warp::http::{StatusCode};
@@ -105,7 +106,9 @@ pub async fn create_doc_filter(
 
     match doc_manager.create_doc(true).await {
         Some(doc_id) => Ok(reply::with_status(
-            reply::json(&doc_id),
+            reply::json(&json!({
+                "docId": doc_id
+            })),
             StatusCode::CREATED,
         )),
         None => Err(warp::reject::custom(Error {
@@ -154,10 +157,12 @@ pub async fn update_doc_filter(
                     reply::json(&{}),
                     StatusCode::OK,
                 )),
-                Err(e) => Err(warp::reject::custom(Error {
-                    code: StatusCode::INTERNAL_SERVER_ERROR,
-                    messages: vec![format!("Error {}, docId: {}", e, doc_id)],
-                }))
+                Err(e) => {
+                    return Err(warp::reject::custom(Error {
+                        code: StatusCode::INTERNAL_SERVER_ERROR,
+                        messages: vec![format!("Error {}, docId: {}", e, doc_id)],
+                    }))
+                }
             }
         }
         // todo: handle other kinds of errors and internal server errors

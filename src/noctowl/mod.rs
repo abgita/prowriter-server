@@ -196,6 +196,8 @@ impl DocManager {
 
         println!("Saving {} for doc {}", if should_save_snapshot {"snapshot"} else {"revision"}, doc_id);
 
+        doc_metadata.current_revision = next_revision;
+
         if should_save_snapshot {
             let next_snapshot = latest_snapshot + 1;
 
@@ -258,6 +260,7 @@ impl DocManager {
     async fn save_rev(&self, file_path: &str,rev_data: &[u8]) -> io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
+            .create(true)
             .append(true)
             .open(file_path)
             .await?;
@@ -317,6 +320,7 @@ impl DocManager {
 
     fn load_doc_file(&self, doc_id: &str) -> io::Result<DocMetadata> {
         let file_path = format!("{}/{}/doc.json", self.docs_folder, doc_id);
+        log::info!("Loading doc metadata from: {}", file_path);
         let file = fs::File::open(file_path)?;
         let metadata: DocMetadata = serde_json::from_reader(file)?;
         Ok(metadata)
@@ -324,6 +328,7 @@ impl DocManager {
 
     fn save_doc_file(&self, doc_id: &str, metadata: &DocMetadata) -> io::Result<()> {
         let file_path = format!("{}/{}/doc.json", self.docs_folder, doc_id);
+        log::info!("Saving doc metadata at: {}. {:?}", file_path, metadata);
         let file = fs::File::create(file_path)?;
         serde_json::to_writer(file, metadata)?;
         Ok(())
