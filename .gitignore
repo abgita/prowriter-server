@@ -1,0 +1,5 @@
+/docs
+/.idea
+/target
+/sd
+.env.development
