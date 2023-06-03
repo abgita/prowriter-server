@@ -1,11 +1,13 @@
 use std::convert::Infallible;
+use std::sync::Arc;
+
 use bytes::Bytes;
-use std::sync::{Arc};
-use serde::{Serialize};
+use serde::Serialize;
 use serde_json::json;
-use tokio::sync::{RwLock};
+use tokio::sync::RwLock;
 use warp::{Filter, Rejection, Reply, reply};
-use warp::http::{StatusCode};
+use warp::http::StatusCode;
+
 use crate::noctowl::{DocManager, Document};
 
 /*
@@ -62,188 +64,272 @@ async fn start_server() {
     };
 }*/
 
-async fn get_doc(doc_manager: Arc<RwLock<DocManager>>, doc_id: &str) ->  Result<Arc<RwLock<Document>>, Box<dyn std::error::Error + Send + Sync>> {
-    {
-        let doc_manager = doc_manager.read().await;
+async fn get_doc(
+	doc_manager: Arc<RwLock<DocManager>>,
+	doc_id: &str,
+) -> Result<Arc<RwLock<Document>>, Box<dyn std::error::Error + Send + Sync>> {
+	{
+		let doc_manager = doc_manager.read().await;
 
-        if doc_manager.is_doc_cached(&doc_id) {
-            return Ok(doc_manager.get_doc_from_cache(&doc_id).clone());
-        }
-    }
+		if doc_manager.is_doc_cached(&doc_id) {
+			return Ok(doc_manager.get_doc_from_cache(&doc_id).clone());
+		}
+	}
 
-    let load_result = {
-        let doc_manager = doc_manager.read().await;
+	let load_result = {
+		let doc_manager = doc_manager.read().await;
 
-        doc_manager.load_doc_from_disk(&doc_id, -1).await
-    };
+		doc_manager.load_doc_from_disk(&doc_id, -1).await
+	};
 
-    return match load_result {
-        Ok(doc) => {
-            {
-                let mut doc_manager = doc_manager.write().await;
-                doc_manager.cache_doc(doc);
-            }
+	return match load_result {
+		Ok(doc) => {
+			{
+				let mut doc_manager = doc_manager.write().await;
+				doc_manager.cache_doc(doc);
+			}
 
-            {
-                let doc_manager = doc_manager.read().await;
-                return Ok(doc_manager.get_doc_from_cache(&doc_id).clone());
-            }
-        },
-        Err(m) => Err(m)
-    }
+			{
+				let doc_manager = doc_manager.read().await;
+				return Ok(doc_manager.get_doc_from_cache(&doc_id).clone());
+			}
+		}
+		Err(m) => Err(m)
+	};
 }
 
 fn with_doc_manager(
-    doc_manager: Arc<RwLock<DocManager>>,
+	doc_manager: Arc<RwLock<DocManager>>,
 ) -> impl Filter<Extract=(Arc<RwLock<DocManager>>, ), Error=Infallible> + Clone {
-    warp::any().map(move || doc_manager.clone())
+	warp::any().map(move || doc_manager.clone())
 }
 
 pub async fn create_doc_filter(
-    doc_manager: Arc<RwLock<DocManager>>
+	doc_manager: Arc<RwLock<DocManager>>
 ) -> Result<impl Reply, Rejection> {
-    let mut doc_manager = doc_manager.write().await;
+	let mut doc_manager = doc_manager.write().await;
 
-    match doc_manager.create_doc(true).await {
-        Some(doc_id) => Ok(reply::with_status(
-            reply::json(&json!({
+	match doc_manager.create_doc(true).await {
+		Some(doc_id) => Ok(reply::with_status(
+			reply::json(&json!({
                 "docId": doc_id
             })),
-            StatusCode::CREATED,
-        )),
-        None => Err(warp::reject::custom(Error {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            messages: vec!["Failed to create document".to_string()],
-        }))
-    }
+			StatusCode::CREATED,
+		)),
+		None => Err(warp::reject::custom(Error {
+			code: StatusCode::INTERNAL_SERVER_ERROR,
+			messages: vec!["Failed to create document".to_string()],
+		}))
+	}
 }
 
 pub async fn get_doc_filter(
-    doc_id: String,
-    doc_manager: Arc<RwLock<DocManager>>
+	doc_id: String,
+	snapshot_id: i64,
+	doc_manager: Arc<RwLock<DocManager>>,
 ) -> Result<impl Reply, Rejection> {
-    match get_doc(doc_manager, &doc_id).await {
-        Ok(doc) => {
-            let cached_doc = doc.read().await;
-            let doc_state = cached_doc.get_doc_state();
+	if snapshot_id != -1 {
+		let load_result = {
+			let doc_manager = doc_manager.read().await;
 
-            Ok(reply::with_status(
-                reply::with_header(doc_state, "Content-Type", "application/octet-stream"),
-                StatusCode::OK,
-            ))
-        }
-        // todo: handle other kinds of errors and internal server errors
-        Err(_) => Err(warp::reject::custom(Error {
-            code: StatusCode::NOT_FOUND,
-            messages: vec!["Document not found".to_string()],
-        }))
-    }
+			doc_manager.load_doc_from_disk(&doc_id, snapshot_id).await
+		};
+
+		return match load_result {
+			Ok(doc) => {
+				{
+					let doc_state = doc.get_doc_state();
+
+					Ok(reply::with_status(
+						reply::with_header(
+							doc_state,
+							"Content-Type",
+							"application/octet-stream",
+						),
+						StatusCode::OK,
+					))
+				}
+			}
+			Err(_) => Err(warp::reject::custom(Error {
+				code: StatusCode::NOT_FOUND,
+				messages: vec!["Document not found".to_string()],
+			}))
+		};
+	}
+
+	match get_doc(doc_manager, &doc_id).await {
+		Ok(doc) => {
+			let cached_doc = doc.read().await;
+			let doc_state = cached_doc.get_doc_state();
+
+			Ok(reply::with_status(
+				reply::with_header(
+					doc_state,
+					"Content-Type",
+					"application/octet-stream",
+				),
+				StatusCode::OK,
+			))
+		}
+		// todo: handle other kinds of errors and internal server errors
+		Err(_) => Err(warp::reject::custom(Error {
+			code: StatusCode::NOT_FOUND,
+			messages: vec!["Document not found".to_string()],
+		}))
+	}
+}
+
+pub async fn get_snapshots_filter(
+	doc_id: String,
+	doc_manager: Arc<RwLock<DocManager>>,
+) -> Result<impl Reply, Rejection> {
+	let doc_manager = doc_manager.read().await;
+
+	match doc_manager.get_snapshot_list(&doc_id, 10).await {
+		Ok(list) => {
+			#[derive(Serialize)]
+			struct Snapshot {
+				id: u64,
+				timestamp: u64,
+			}
+
+			#[derive(Serialize)]
+			struct SnapshotList {
+				list: Vec<Snapshot>,
+			}
+
+			let res = list.iter().map(|(id, timestamp)| Snapshot {
+				id: id.clone(),
+				timestamp: timestamp.clone(),
+			}).collect::<Vec<Snapshot>>();
+
+			Ok(reply::with_status(
+				reply::json(&SnapshotList {
+					list: res
+				}),
+				StatusCode::OK,
+			))
+		}
+		// todo: handle other kinds of errors and internal server errors
+		Err(_) => Err(warp::reject::custom(Error {
+			code: StatusCode::NOT_FOUND,
+			messages: vec!["Document not found".to_string()],
+		}))
+	}
 }
 
 pub async fn update_doc_filter(
-    doc_id: String,
-    body: Bytes,
-    doc_manager: Arc<RwLock<DocManager>>
+	doc_id: String,
+	body: Bytes,
+	doc_manager: Arc<RwLock<DocManager>>,
 ) -> Result<impl Reply, Rejection> {
-    let update: Vec<u8> = body.iter().map(|b| *b).collect();
+	let update: Vec<u8> = body.iter().map(|b| *b).collect();
 
-    return match get_doc(doc_manager.clone(), &doc_id).await {
-        Ok(doc) => {
-            let doc_manager = doc_manager.read().await;
-            let mut doc = doc.write().await;
+	return match get_doc(doc_manager.clone(), &doc_id).await {
+		Ok(doc) => {
+			let doc_manager = doc_manager.read().await;
+			let mut doc = doc.write().await;
 
-            match doc_manager.update_doc(&doc_id, &mut doc, &update).await {
-                Ok(()) => Ok(reply::with_status(
-                    reply::json(&{}),
-                    StatusCode::OK,
-                )),
-                Err(e) => {
-                    return Err(warp::reject::custom(Error {
-                        code: StatusCode::INTERNAL_SERVER_ERROR,
-                        messages: vec![format!("Error {}, docId: {}", e, doc_id)],
-                    }))
-                }
-            }
-        }
-        // todo: handle other kinds of errors and internal server errors
-        Err(_) => Err(warp::reject::custom(Error {
-            code: StatusCode::NOT_FOUND,
-            messages: vec!["Document not found".to_string()],
-        }))
-    };
+			match doc_manager.update_doc(&doc_id, &mut doc, &update).await {
+				Ok(()) => Ok(reply::with_status(
+					reply::json(&{}),
+					StatusCode::OK,
+				)),
+				Err(e) => {
+					return Err(warp::reject::custom(Error {
+						code: StatusCode::INTERNAL_SERVER_ERROR,
+						messages: vec![format!("Error {}, docId: {}", e, doc_id)],
+					}));
+				}
+			}
+		}
+		// todo: handle other kinds of errors and internal server errors
+		Err(_) => Err(warp::reject::custom(Error {
+			code: StatusCode::NOT_FOUND,
+			messages: vec!["Document not found".to_string()],
+		}))
+	};
 }
 
-pub fn create_routes(doc_manager: Arc<RwLock<DocManager>>) -> impl Filter<Extract = impl Reply, Error = Infallible> + Clone {
-    let create_doc_filter = warp::path!("doc")
-        .and(warp::post())
-        .and(with_doc_manager(doc_manager.clone()))
-        .and_then(create_doc_filter);
+pub fn create_routes(
+	doc_manager: Arc<RwLock<DocManager>>
+) -> impl Filter<Extract=impl Reply, Error=Infallible> + Clone {
+	let create_doc_filter = warp::path!("doc")
+		.and(warp::post())
+		.and(with_doc_manager(doc_manager.clone()))
+		.and_then(create_doc_filter);
 
-    let get_doc_filter = warp::path!("doc" / String)
-        .and(warp::get())
-        .and(with_doc_manager(doc_manager.clone()))
-        .and_then(get_doc_filter);
+	let get_doc_filter = warp::path!("doc" / String / i64)
+		.and(warp::get())
+		.and(with_doc_manager(doc_manager.clone()))
+		.and_then(get_doc_filter);
 
-    let update_doc_filter = warp::path!("doc" / String / "update")
-        .and(warp::post())
-        .and(warp::header::exact("content-type", "application/octet-stream"))
-        .and(warp::body::content_length_limit(10 * 1024 * 1024))
-        .and(warp::body::bytes())
-        .and(with_doc_manager(doc_manager.clone()))
-        .and_then(update_doc_filter);
+	let update_doc_filter = warp::path!("doc" / String / "update")
+		.and(warp::post())
+		.and(warp::header::exact("content-type", "application/octet-stream"))
+		.and(warp::body::content_length_limit(10 * 1024 * 1024))
+		.and(warp::body::bytes())
+		.and(with_doc_manager(doc_manager.clone()))
+		.and_then(update_doc_filter);
 
-    create_doc_filter
-        .or(get_doc_filter)
-        .or(update_doc_filter)
-        .recover(handle_rejection)
+	let get_doc_snaps_filter = warp::path!("doc" / String / "snapshots")
+		.and(warp::get())
+		.and(with_doc_manager(doc_manager.clone()))
+		.and_then(get_snapshots_filter);
+
+	create_doc_filter
+		.or(get_doc_filter)
+		.or(update_doc_filter)
+		.or(get_doc_snaps_filter)
+		.recover(handle_rejection)
 }
 
 #[derive(Debug)]
 pub struct Error {
-    pub code: StatusCode,
-    pub messages: Vec<String>,
+	pub code: StatusCode,
+	pub messages: Vec<String>,
 }
 
 impl warp::reject::Reject for Error {}
 
 impl Error {
-    pub fn single(code: StatusCode, message: &str) -> Error {
-        Error {
-            code,
-            messages: vec![message.to_string()],
-        }
-    }
+	pub fn single(code: StatusCode, message: &str) -> Error {
+		Error {
+			code,
+			messages: vec![message.to_string()],
+		}
+	}
 
-    pub fn bad_request_single(message: &str) -> Error {
-        Error::single(StatusCode::BAD_REQUEST, message)
-    }
+	pub fn bad_request_single(message: &str) -> Error {
+		Error::single(StatusCode::BAD_REQUEST, message)
+	}
 }
 
 #[derive(Serialize)]
 pub struct ErrorMessage {
-    pub errors: Vec<String>,
+	pub errors: Vec<String>,
 }
 
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
-    let code: StatusCode;
-    let error_messages: Vec<String>;
+	let code: StatusCode;
+	let error_messages: Vec<String>;
 
-    if err.is_not_found() {
-        code = StatusCode::NOT_FOUND;
-        error_messages = vec!["NOT_FOUND".to_string()];
-    } else if let Some(error) = err.find::<Error>() {
-        code = error.code;
-        error_messages = error.messages.clone();
-    } else {
-        eprintln!("unhandled rejection: {:?}", err);
+	if err.is_not_found() {
+		code = StatusCode::NOT_FOUND;
+		error_messages = vec!["NOT_FOUND".to_string()];
+	} else if let Some(error) = err.find::<Error>() {
+		code = error.code;
+		error_messages = error.messages.clone();
+	} else {
+		eprintln!("unhandled rejection: {:?}", err);
 
-        code = StatusCode::INTERNAL_SERVER_ERROR;
-        error_messages = vec!["INTERNAL_SERVER_ERROR".to_string()];
-    }
+		code = StatusCode::INTERNAL_SERVER_ERROR;
+		error_messages = vec!["INTERNAL_SERVER_ERROR".to_string()];
+	}
 
-    let json = reply::json(&ErrorMessage {
-        errors: error_messages,
-    });
+	let json = reply::json(&ErrorMessage {
+		errors: error_messages,
+	});
 
-    Ok(reply::with_status(json, code))
+	Ok(reply::with_status(json, code))
 }
