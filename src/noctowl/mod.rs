@@ -1,4 +1,5 @@
 mod storage;
+mod fs_storage;
 
 use std::collections::HashMap;
 use std::fs;
