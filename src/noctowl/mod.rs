@@ -5,10 +5,9 @@ use std::collections::HashMap;
 use std::io::{Error};
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use yrs::{Doc, merge_updates_v1, ReadTxn, StateVector, Transact, Update};
-use yrs::types::ToJson;
 use yrs::updates::decoder::Decode;
 
 use crate::clog;
@@ -20,6 +19,7 @@ use crate::noctowl::storage::{DocMetadata, Revision, Snapshot, SnapshotInfo, Sto
 pub struct Document {
 	pub id: String,
 	pub ydoc: Box<Doc>,
+	pub lock: Arc<Mutex<()>>
 }
 
 impl Document {
@@ -27,6 +27,7 @@ impl Document {
 		Self {
 			id: String::from(name),
 			ydoc: Box::from(Doc::new()),
+			lock: Arc::new(Mutex::new(()))
 		}
 	}
 
@@ -56,19 +57,24 @@ impl DocManager {
 	}
 
 	#[inline]
-	pub async fn get_doc_from_cache(&self, doc_id: &str) -> Arc<RwLock<Document>> {
+	pub async fn get_doc_from_cache(&self, doc_id: &str) -> Option<Arc<RwLock<Document>>> {
 		{
 			let cache = self.cache.read().await;
 
-			cache.get(doc_id).unwrap().clone()
+			match cache.get(doc_id) {
+				Some(doc) => Some(doc.clone()),
+				None => None,
+			}
 		}
 	}
 
 	#[inline]
-	pub async fn cache_doc(&self, doc: Document) {
+	pub async fn cache_doc(&self, doc: Arc<RwLock<Document>>) {
 		let mut cache = self.cache.write().await;
 
-		cache.insert(doc.id.clone(), Arc::new(RwLock::new(doc)));
+		let id = doc.read().await.id.clone();
+
+		cache.insert(id, doc);
 	}
 
 	pub async fn get_snapshot_list(
@@ -91,7 +97,7 @@ impl DocManager {
 		&self,
 		doc_id: &str,
 		snapshot_id: i64,
-	) -> Result<Document, Box<Error>> {
+	) -> Result<Arc<RwLock<Document>>, Box<Error>> {
 		clog!("Loading doc \"{}\" from disk", doc_id);
 
 		let fs = FileSystemStorage::new("docs");
@@ -141,15 +147,15 @@ impl DocManager {
 		if current_revision > 0 {
 			let revs = match fs.load_revisions(doc_id, latest_snapshot)
 				.await {
-					Ok(revs) => revs,
-					Err(e) => {
-						log::error!("{}", e);
+				Ok(revs) => revs,
+				Err(e) => {
+					log::error!("{}", e);
 
-						return Err(Box::new(Error::new(
-							std::io::ErrorKind::NotFound,
-							"Revisions not found",
-						)))
-					}
+					return Err(Box::new(Error::new(
+						std::io::ErrorKind::NotFound,
+						"Revisions not found",
+					)))
+				}
 			};
 
 			let updates: Vec<&[u8]> = revs.iter().map(|rev| rev.data.as_ref()).collect();
@@ -174,7 +180,9 @@ impl DocManager {
 			}
 		}
 
-		Ok(doc)
+		let doc_arc = Arc::new(RwLock::new(doc));
+
+		Ok(doc_arc)
 	}
 
 	fn generate_doc_id(&self) -> String {
@@ -236,9 +244,7 @@ impl DocManager {
 		document: &mut Document,
 		update: &[u8],
 	) -> Result<(), Box<dyn std::error::Error>> {
-		let doc = &document.ydoc;
-
-		doc.transact_mut().apply_update(Update::decode_v1(update).unwrap());
+		let _guard = document.lock.lock().await;
 
 		let fs = FileSystemStorage::new("docs");
 
@@ -288,7 +294,6 @@ impl DocManager {
 				}
 			};
 
-
 			doc_metadata.latest_snapshot = next_snapshot;
 		} else {
 			let revision = Revision {
@@ -321,14 +326,13 @@ impl DocManager {
 			}
 		};
 
+		let doc = &document.ydoc;
+		doc.transact_mut().apply_update(Update::decode_v1(update).unwrap());
+
 		Ok(())
 	}
 
 	fn apply_full_update(&self, doc: &Doc, message: Vec<u8>) {
 		doc.transact_mut().apply_update(Update::decode_v1(&message).unwrap())
-	}
-
-	fn log_doc_as_json(&self, doc: &Doc) {
-		log::info!("{}", doc.to_json(&doc.transact()));
 	}
 }

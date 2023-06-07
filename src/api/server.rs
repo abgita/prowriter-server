@@ -14,18 +14,16 @@ use crate::noctowl::storage::{SnapshotInfo};
 async fn get_doc(
 	doc_manager: Arc<DocManager>,
 	doc_id: &str,
-) -> Result<Arc<RwLock<Document>>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<Arc<RwLock<Document>>>, Box<dyn std::error::Error + Send + Sync>> {
 	if doc_manager.is_doc_cached(&doc_id).await {
 		return Ok(doc_manager.get_doc_from_cache(&doc_id).await);
 	}
 
-	let load_result = doc_manager.load_doc_from_disk(&doc_id, -1).await;
-
-	return match load_result {
+	return match doc_manager.load_doc_from_disk(&doc_id, -1).await {
 		Ok(doc) => {
-			doc_manager.cache_doc(doc).await;
+			doc_manager.cache_doc(doc.clone()).await;
 
-			return Ok(doc_manager.get_doc_from_cache(&doc_id).await);
+			return Ok(Some(doc));
 		}
 		Err(m) => Err(m)
 	};
@@ -65,7 +63,11 @@ pub async fn get_doc_filter(
 		return match load_result {
 			Ok(doc) => {
 				{
-					let doc_state = doc.get_doc_state();
+					let doc_state = {
+						let doc = doc.read().await;
+
+						doc.get_doc_state()
+					};
 
 					Ok(reply::with_status(
 						reply::with_header(
@@ -86,8 +88,20 @@ pub async fn get_doc_filter(
 
 	match get_doc(doc_manager, &doc_id).await {
 		Ok(doc) => {
-			let cached_doc = doc.read().await;
-			let doc_state = cached_doc.get_doc_state();
+			if doc.is_none() {
+				return Err(warp::reject::custom(Error {
+					code: StatusCode::NOT_FOUND,
+					messages: vec!["Document not found".to_string()],
+				}));
+			}
+
+			let doc = doc.unwrap();
+
+			let doc_state = {
+				let cached_doc = doc.read().await;
+
+				cached_doc.get_doc_state()
+			};
 
 			Ok(reply::with_status(
 				reply::with_header(
@@ -141,19 +155,26 @@ pub async fn update_doc_filter(
 
 	return match get_doc(doc_manager.clone(), &doc_id).await {
 		Ok(doc) => {
-			let mut doc = doc.write().await;
+			return if let Some(doc) = doc {
+				let mut doc = doc.write().await;
 
-			match doc_manager.update_doc(&doc_id, &mut doc, &update).await {
-				Ok(()) => Ok(reply::with_status(
-					reply::json(&{}),
-					StatusCode::OK,
-				)),
-				Err(e) => {
-					return Err(warp::reject::custom(Error {
-						code: StatusCode::INTERNAL_SERVER_ERROR,
-						messages: vec![format!("Error {}, docId: {}", e, doc_id)],
-					}));
+				match doc_manager.update_doc(&doc_id, &mut doc, &update).await {
+					Ok(()) => Ok(reply::with_status(
+						reply::json(&{}),
+						StatusCode::OK,
+					)),
+					Err(e) => {
+						return Err(warp::reject::custom(Error {
+							code: StatusCode::INTERNAL_SERVER_ERROR,
+							messages: vec![format!("Error {}, docId: {}", e, doc_id)],
+						}));
+					}
 				}
+			} else {
+				Err(warp::reject::custom(Error {
+					code: StatusCode::NOT_FOUND,
+					messages: vec!["Document not found".to_string()],
+				}))
 			}
 		}
 		// todo: handle other kinds of errors and internal server errors
