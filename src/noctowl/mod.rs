@@ -1,3 +1,5 @@
+mod storage;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Error, SeekFrom};
@@ -50,6 +52,16 @@ struct DocMetadata {
 	current_revision: u64,
 	#[serde(rename = "latestSnapshot")]
 	latest_snapshot: u64,
+}
+
+struct Revision {
+	timestamp: u64,
+	data: Vec<u8>,
+}
+
+struct Snapshot {
+	timestamp: u64,
+	data: Vec<u8>,
 }
 
 const REV_NAME_ID: &str = "_rev";
@@ -314,6 +326,8 @@ impl DocManager {
 		Ok(timestamp)
 	}
 
+
+
 	async fn read_snapshot(&self, file_path: &str) -> io::Result<(u64, Vec<u8>)> {
 		let mut file = File::open(&file_path).await?;
 
@@ -414,3 +428,4 @@ impl DocManager {
 		Ok(())
 	}
 }
+

@@ -273,7 +273,6 @@ pub fn create_routes(
 		.and_then(update_doc_filter);
 
 	let get_doc_snaps_filter = warp::path!("doc" / String / "snapshots")
-		.and(warp::get())
 		.and(with_doc_manager(doc_manager.clone()))
 		.and_then(get_snapshots_filter);
 

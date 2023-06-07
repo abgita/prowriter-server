@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use dotenv::from_filename;
 use tokio::sync::RwLock;
+use warp::Filter;
 
 use common::logging;
 use noctowl::DocManager;
@@ -29,6 +30,17 @@ async fn main() {
 
 	let doc_manager = Arc::new(RwLock::new(DocManager::new("docs")));
 
-	let routes = server::create_routes(doc_manager);
-	warp::serve(routes).run((Ipv4Addr::UNSPECIFIED, 3003)).await;
+	if cfg!(debug_assertions) {
+		let cors = warp::cors()
+				.allow_methods(vec!["POST", "OPTIONS", "GET"])
+				.allow_headers(vec!["Content-Type", "Authorization", "Accept"])
+				.allow_any_origin();
+
+		let routes = server::create_routes(doc_manager).with(cors);
+
+		warp::serve(routes).run((Ipv4Addr::UNSPECIFIED, 3003)).await;
+	} else {
+		let routes = server::create_routes(doc_manager);
+		warp::serve(routes).run((Ipv4Addr::UNSPECIFIED, 3003)).await;
+	}
 }
