@@ -4,7 +4,6 @@ use std::io::{SeekFrom};
 use std::path::Path;
 
 use tokio::fs::{File, OpenOptions};
-use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::clog;
@@ -24,20 +23,36 @@ pub struct FileSystemStorage {
 const REV_NAME_ID: &str = "_rev";
 const SNAP_NAME_ID: &str = "_snap";
 
+impl FileSystemStorage {
+	pub fn new(docs_folder: &str) -> Self {
+		Self {
+			docs_folder: docs_folder.to_string(),
+		}
+	}
+}
+
 #[async_trait]
 impl StorageBackend for FileSystemStorage {
 	async fn create_doc(
-		&mut self,
+		&self,
 		doc_id: &str,
 		snapshot: &Snapshot,
 	) -> Result<String, StorageError> {
 		let dir = Path::new(&self.docs_folder).join(&doc_id);
 
 		if !dir.exists() {
-			fs::create_dir_all(&dir).map_err(|e| {
+			match fs::create_dir_all(&dir).map_err(|e| {
 				eprintln!("Error creating directory: {}", e);
 				e.kind()
-			}).ok();
+			}) {
+				Ok(_) => (),
+				Err(e) => {
+					return Err(StorageError::SaveError(format!(
+						"Failed to create directory: {}",
+						e
+					)))
+				}
+			}
 		}
 
 		self.save_snapshot(&doc_id, 0, &snapshot).await?;
@@ -71,10 +86,6 @@ impl StorageBackend for FileSystemStorage {
 		} else {
 			snapshot_id as u64
 		};
-
-		// get latest snapshot
-		let snapshot_path =
-			format!("{}/{}/{}{}", self.docs_folder, doc_id, latest_snapshot, SNAP_NAME_ID);
 
 		let snapshot = match self.load_snapshot(&doc_id, latest_snapshot).await {
 			Ok(s) => s,
@@ -112,20 +123,45 @@ impl StorageBackend for FileSystemStorage {
 		&self,
 		doc_id: &str,
 		snapshot_id: u64
-	) -> io::Result<Snapshot> {
+	) -> Result<Snapshot, StorageError> {
 		let file_path =
 			format!("{}/{}/{}{}", self.docs_folder, doc_id, snapshot_id, SNAP_NAME_ID);
 
-		let mut file = File::open(&file_path).await?;
+		let mut file = match File::open(&file_path).await {
+			Ok(f) => f,
+			Err(e) => {
+				return Err(StorageError::LoadError(format!(
+					"Failed to load snapshot: {}",
+					e
+				)))
+			}
+		};
 
 		// Read the timestamp
 		let mut timestamp_bytes = [0; 8];
-		file.read_exact(&mut timestamp_bytes).await?;
-		let timestamp = u64::from_be_bytes(timestamp_bytes);
+
+		let timestamp = match file.read_exact(&mut timestamp_bytes).await {
+			Ok(_) => u64::from_be_bytes(timestamp_bytes),
+			Err(e) => {
+				return Err(StorageError::LoadError(format!(
+					"Failed to read timestamp: {}",
+					e
+				)))
+			}
+		};
 
 		// Read the buffer data
 		let mut buffer = Vec::new();
-		file.read_to_end(&mut buffer).await?;
+
+		match file.read_to_end(&mut buffer).await {
+			Ok(_) => (),
+			Err(e) => {
+				return Err(StorageError::LoadError(format!(
+					"Failed to read snapshot data: {}",
+					e
+				)))
+			}
+		};
 
 		Ok(Snapshot {
 			timestamp,
@@ -203,19 +239,16 @@ impl StorageBackend for FileSystemStorage {
 		let rev_file_name = format!("{}{}", snapshot_id, REV_NAME_ID);
 		let file_path = format!("{}/{}/{}", self.docs_folder, doc_id, rev_file_name);
 
-		let mut file = match File::open(file_path).await {
+		let mut file = match File::open(&file_path).await {
 			Ok(f) => f,
 			Err(e) => {
 				return Err(StorageError::LoadError(format!(
-					"Failed to load revisions file: {}",
-					e
+					"Failed to load revisions file '{}': {}", file_path, e
 				)))
 			}
 		};
 
 		let mut revs = Vec::new();
-
-		let mut total_bytes_read = 0;
 
 		while let Ok(n) = file.read(&mut [0; 1]).await {
 			if n == 0 {
@@ -244,8 +277,6 @@ impl StorageBackend for FileSystemStorage {
 				}
 			};
 
-			total_bytes_read += 4;
-
 			let mut timestamp_bytes = [0; 8];
 			let timestamp = match file.read_exact(&mut timestamp_bytes).await {
 				Ok(_) => u64::from_le_bytes(timestamp_bytes),
@@ -256,8 +287,6 @@ impl StorageBackend for FileSystemStorage {
 					)))
 				}
 			};
-
-			total_bytes_read += 8;
 
 			let rev_data_size = rev_size - 8;
 
@@ -272,8 +301,6 @@ impl StorageBackend for FileSystemStorage {
 					)))
 				}
 			};
-
-			total_bytes_read += rev_data_size;
 
 			revs.push(Revision {
 				timestamp,

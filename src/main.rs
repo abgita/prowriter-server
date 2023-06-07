@@ -9,6 +9,7 @@ use common::logging;
 use noctowl::DocManager;
 
 use crate::api::server;
+use crate::noctowl::fs_storage::FileSystemStorage;
 
 mod common;
 mod api;
@@ -28,7 +29,7 @@ async fn main() {
 	logging::setup(false);
 	load_env_variables();
 
-	let doc_manager = Arc::new(RwLock::new(DocManager::new("docs")));
+	let doc_manager = Arc::new(DocManager::new());
 
 	if cfg!(debug_assertions) {
 		let cors = warp::cors()
