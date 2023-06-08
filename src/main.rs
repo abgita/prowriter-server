@@ -2,14 +2,12 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use dotenv::from_filename;
-use tokio::sync::RwLock;
 use warp::Filter;
 
 use common::logging;
-use noctowl::DocManager;
+use noctowl::doc_manager::DocManager;
 
 use crate::api::server;
-use crate::noctowl::fs_storage::FileSystemStorage;
 
 mod common;
 mod api;

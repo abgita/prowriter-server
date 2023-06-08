@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum StorageError {
 	LoadError(String),
 	SaveError(String),
+	ConnectionError(String),
+	CreationError(String),
 }
 
 impl fmt::Display for StorageError {
@@ -13,6 +15,8 @@ impl fmt::Display for StorageError {
 		match self {
 			StorageError::LoadError(s) => write!(f, "LoadError: {}", s),
 			StorageError::SaveError(s) => write!(f, "SaveError: {}", s),
+			StorageError::ConnectionError(s) => write!(f, "ConnectionError: {}", s),
+			StorageError::CreationError(s) => write!(f, "CreationError: {}", s),
 		}
 	}
 }

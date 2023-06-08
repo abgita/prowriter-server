@@ -1,188 +1,23 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use serde::Serialize;
-use serde_json::json;
-use tokio::sync::RwLock;
 use warp::{Filter, Rejection, Reply, reply};
 use warp::http::StatusCode;
 
-use crate::noctowl::{DocManager, Document};
-use crate::noctowl::storage::{SnapshotInfo};
+use crate::noctowl::doc_manager::{DocManager};
 
-async fn get_doc(
-	doc_manager: Arc<DocManager>,
-	doc_id: &str,
-) -> Result<Option<Arc<RwLock<Document>>>, Box<dyn std::error::Error + Send + Sync>> {
-	if doc_manager.is_doc_cached(&doc_id).await {
-		return Ok(doc_manager.get_doc_from_cache(&doc_id).await);
-	}
-
-	return match doc_manager.load_doc_from_disk(&doc_id, -1).await {
-		Ok(doc) => {
-			doc_manager.cache_doc(doc.clone()).await;
-
-			return Ok(Some(doc));
-		}
-		Err(m) => Err(m)
-	};
-}
+use crate::api::routes::{
+	create_doc,
+	get_doc,
+	update_doc,
+	get_snapshots,
+};
 
 fn with_doc_manager(
 	doc_manager: Arc<DocManager>,
 ) -> impl Filter<Extract=(Arc<DocManager>, ), Error=Infallible> + Clone {
 	warp::any().map(move || doc_manager.clone())
-}
-
-pub async fn create_doc_filter(
-	doc_manager: Arc<DocManager>
-) -> Result<impl Reply, Rejection> {
-	match doc_manager.create_doc(true).await {
-		Some(doc_id) => Ok(reply::with_status(
-			reply::json(&json!({
-                "docId": doc_id
-            })),
-			StatusCode::CREATED,
-		)),
-		None => Err(warp::reject::custom(Error {
-			code: StatusCode::INTERNAL_SERVER_ERROR,
-			messages: vec!["Failed to create document".to_string()],
-		}))
-	}
-}
-
-pub async fn get_doc_filter(
-	doc_id: String,
-	snapshot_id: i64,
-	doc_manager: Arc<DocManager>,
-) -> Result<impl Reply, Rejection> {
-	if snapshot_id != -1 {
-		let load_result = doc_manager.load_doc_from_disk(&doc_id, snapshot_id).await;
-
-		return match load_result {
-			Ok(doc) => {
-				{
-					let doc_state = {
-						let doc = doc.read().await;
-
-						doc.get_doc_state()
-					};
-
-					Ok(reply::with_status(
-						reply::with_header(
-							doc_state,
-							"Content-Type",
-							"application/octet-stream",
-						),
-						StatusCode::OK,
-					))
-				}
-			}
-			Err(_) => Err(warp::reject::custom(Error {
-				code: StatusCode::NOT_FOUND,
-				messages: vec!["Document not found".to_string()],
-			}))
-		};
-	}
-
-	match get_doc(doc_manager, &doc_id).await {
-		Ok(doc) => {
-			if doc.is_none() {
-				return Err(warp::reject::custom(Error {
-					code: StatusCode::NOT_FOUND,
-					messages: vec!["Document not found".to_string()],
-				}));
-			}
-
-			let doc = doc.unwrap();
-
-			let doc_state = {
-				let cached_doc = doc.read().await;
-
-				cached_doc.get_doc_state()
-			};
-
-			Ok(reply::with_status(
-				reply::with_header(
-					doc_state,
-					"Content-Type",
-					"application/octet-stream",
-				),
-				StatusCode::OK,
-			))
-		}
-		// todo: handle other kinds of errors and internal server errors
-		Err(_) => Err(warp::reject::custom(Error {
-			code: StatusCode::NOT_FOUND,
-			messages: vec!["Document not found".to_string()],
-		}))
-	}
-}
-
-pub async fn get_snapshots_filter(
-	doc_id: String,
-	doc_manager: Arc<DocManager>,
-) -> Result<impl Reply, Rejection> {
-	match doc_manager.get_snapshot_list(&doc_id, 10).await {
-		Ok(list) => {
-			#[derive(Serialize)]
-			struct SnapshotList {
-				list: Vec<SnapshotInfo>,
-			}
-
-			Ok(reply::with_status(
-				reply::json(&SnapshotList {
-					list
-				}),
-				StatusCode::OK,
-			))
-		}
-		// todo: handle other kinds of errors and internal server errors
-		Err(_) => Err(warp::reject::custom(Error {
-			code: StatusCode::NOT_FOUND,
-			messages: vec!["Document not found".to_string()],
-		}))
-	}
-}
-
-pub async fn update_doc_filter(
-	doc_id: String,
-	body: Bytes,
-	doc_manager: Arc<DocManager>,
-) -> Result<impl Reply, Rejection> {
-	let update: Vec<u8> = body.iter().map(|b| *b).collect();
-
-	return match get_doc(doc_manager.clone(), &doc_id).await {
-		Ok(doc) => {
-			return if let Some(doc) = doc {
-				let mut doc = doc.write().await;
-
-				match doc_manager.update_doc(&doc_id, &mut doc, &update).await {
-					Ok(()) => Ok(reply::with_status(
-						reply::json(&{}),
-						StatusCode::OK,
-					)),
-					Err(e) => {
-						return Err(warp::reject::custom(Error {
-							code: StatusCode::INTERNAL_SERVER_ERROR,
-							messages: vec![format!("Error {}, docId: {}", e, doc_id)],
-						}));
-					}
-				}
-			} else {
-				Err(warp::reject::custom(Error {
-					code: StatusCode::NOT_FOUND,
-					messages: vec!["Document not found".to_string()],
-				}))
-			}
-		}
-		// todo: handle other kinds of errors and internal server errors
-		Err(_) => Err(warp::reject::custom(Error {
-			code: StatusCode::NOT_FOUND,
-			messages: vec!["Document not found".to_string()],
-		}))
-	};
 }
 
 pub fn create_routes(
@@ -191,12 +26,12 @@ pub fn create_routes(
 	let create_doc_filter = warp::path!("doc")
 		.and(warp::post())
 		.and(with_doc_manager(doc_manager.clone()))
-		.and_then(create_doc_filter);
+		.and_then(create_doc::create_doc_filter);
 
 	let get_doc_filter = warp::path!("doc" / String / i64)
 		.and(warp::get())
 		.and(with_doc_manager(doc_manager.clone()))
-		.and_then(get_doc_filter);
+		.and_then(get_doc::get_doc_filter);
 
 	let update_doc_filter = warp::path!("doc" / String / "update")
 		.and(warp::post())
@@ -204,11 +39,11 @@ pub fn create_routes(
 		.and(warp::body::content_length_limit(10 * 1024 * 1024))
 		.and(warp::body::bytes())
 		.and(with_doc_manager(doc_manager.clone()))
-		.and_then(update_doc_filter);
+		.and_then(update_doc::update_doc_filter);
 
 	let get_doc_snaps_filter = warp::path!("doc" / String / "snapshots")
 		.and(with_doc_manager(doc_manager.clone()))
-		.and_then(get_snapshots_filter);
+		.and_then(get_snapshots::get_snapshots_filter);
 
 	create_doc_filter
 		.or(get_doc_filter)
