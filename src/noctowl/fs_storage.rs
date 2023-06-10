@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::{fs};
 use std::io::{SeekFrom};
 use std::path::Path;
@@ -10,7 +9,6 @@ use crate::clog;
 use crate::noctowl::storage::{
 	Snapshot,
 	SnapshotInfo,
-	StorageBackend,
 	StorageError,
 	DocMetadata,
 	Revision
@@ -31,9 +29,8 @@ impl FileSystemStorage {
 	}
 }
 
-#[async_trait]
-impl StorageBackend for FileSystemStorage {
-	async fn create_doc(
+impl FileSystemStorage {
+	pub(crate) async fn create_doc(
 		&self,
 		doc_id: &str,
 		snapshot: &Snapshot,
@@ -119,7 +116,7 @@ impl StorageBackend for FileSystemStorage {
 		Ok((snapshot, None))
 	}
 
-	async fn load_snapshot(
+	pub(crate) async fn load_snapshot(
 		&self,
 		doc_id: &str,
 		snapshot_id: u64
@@ -169,7 +166,7 @@ impl StorageBackend for FileSystemStorage {
 		})
 	}
 
-	async fn get_latest_snapshots(
+	pub(crate) async fn get_latest_snapshots(
 		&self,
 		doc_id: &str,
 		amount: usize
@@ -231,7 +228,7 @@ impl StorageBackend for FileSystemStorage {
 		Ok(snapshots)
 	}
 
-	async fn load_revisions(
+	pub(crate) async fn load_revisions(
 		&self,
 		doc_id: &str,
 		snapshot_id: u64
@@ -311,7 +308,7 @@ impl StorageBackend for FileSystemStorage {
 		Ok(revs)
 	}
 
-	async fn save_snapshot(
+	pub(crate) async fn save_snapshot(
 		&self,
 		doc_id: &str,
 		snapshot_id: u64,
@@ -353,7 +350,7 @@ impl StorageBackend for FileSystemStorage {
 		Ok(())
 	}
 
-	async fn save_revision(
+	pub(crate) async fn save_revision(
 		&self,
 		doc_id: &str,
 		revision_id: u64,
@@ -414,7 +411,7 @@ impl StorageBackend for FileSystemStorage {
 		Ok(())
 	}
 
-	async fn load_metadata(&self, doc_id: &str) -> Result<DocMetadata, StorageError> {
+	pub(crate) async fn load_metadata(&self, doc_id: &str) -> Result<DocMetadata, StorageError> {
 		let file_path = format!("{}/{}/doc.json", self.docs_folder, doc_id);
 
 		log::info!("Loading doc metadata from: {}", file_path);
@@ -449,7 +446,7 @@ impl StorageBackend for FileSystemStorage {
 		}
 	}
 
-	async fn save_metadata(&self, doc_id: &str, metadata: &DocMetadata) -> Result<(), StorageError> {
+	pub(crate) async fn save_metadata(&self, doc_id: &str, metadata: &DocMetadata) -> Result<(), StorageError> {
 		let file_path = format!("{}/{}/doc.json", self.docs_folder, doc_id);
 
 		log::info!("Saving doc metadata at: {}. {:?}", file_path, metadata);

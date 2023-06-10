@@ -42,7 +42,7 @@ pub fn setup(to_file: bool) {
 
     env_logger::Builder::new()
         .format(formatter)
-        .filter(None, LevelFilter::Debug)
+        .filter(None, LevelFilter::Info)
         .write_style(WriteStyle::Always)
         .target(
             if to_file {

@@ -1,6 +1,5 @@
 use std::fmt;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub enum StorageError {
@@ -55,62 +54,4 @@ pub struct Snapshot {
 pub struct SnapshotInfo {
 	pub id: u64,
 	pub timestamp: u64,
-}
-
-#[async_trait]
-pub trait StorageBackend: Send + Sync {
-	async fn create_doc(
-		&self,
-		doc_id: &str,
-		snapshot: &Snapshot,
-	) -> Result<String, StorageError>;
-
-	async fn load_doc(
-		&self,
-		doc_id: &str,
-		snapshot_id: i64,
-	) -> Result<(Snapshot, Option<Vec<Revision>>), StorageError>;
-
-	async fn load_snapshot(
-		&self,
-		doc_id: &str,
-		snapshot_id: u64,
-	) -> Result<Snapshot, StorageError>;
-
-	async fn get_latest_snapshots(
-		&self,
-		doc_id: &str,
-		amount: usize,
-	) -> Result<Vec<SnapshotInfo>, StorageError>;
-
-	async fn load_revisions(
-		&self,
-		doc_id: &str,
-		snapshot_id: u64,
-	) -> Result<Vec<Revision>, StorageError>;
-
-	async fn save_snapshot(
-		&self,
-		doc_id: &str,
-		snapshot_id: u64,
-		snapshot: &Snapshot,
-	) -> Result<(), StorageError>;
-
-	async fn save_revision(
-		&self,
-		doc_id: &str,
-		revision_id: u64,
-		revision: &Revision,
-	) -> Result<(), StorageError>;
-
-	async fn load_metadata(
-		&self,
-		doc_id: &str,
-	) -> Result<DocMetadata, StorageError>;
-
-	async fn save_metadata(
-		&self,
-		doc_id: &str,
-		metadata: &DocMetadata,
-	) -> Result<(), StorageError>;
 }

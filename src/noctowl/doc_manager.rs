@@ -10,7 +10,7 @@ use yrs::updates::decoder::Decode;
 use crate::clog;
 use crate::common::utils;
 use crate::noctowl::fs_storage::FileSystemStorage;
-use crate::noctowl::storage::{DocMetadata, Revision, Snapshot, SnapshotInfo, StorageBackend};
+use crate::noctowl::storage::{DocMetadata, Revision, Snapshot, SnapshotInfo};
 
 #[derive(Debug, Clone)]
 pub struct Document {
