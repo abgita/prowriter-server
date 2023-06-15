@@ -1,15 +1,17 @@
 use std::sync::Arc;
-use tokio::{task};
+
 use tokio::sync::RwLock;
+use tokio::task;
+use yrs::merge_updates_v1;
+
+use crate::common::logging;
+use crate::common::utils::get_new_user_pid;
+use crate::noctowl::lib::Noctowl;
+use crate::noctowl::NoctowlError;
+use crate::noctowl::testing::{get_test_updates, get_test_users};
 
 mod common;
 mod noctowl;
-use crate::common::{logging};
-use crate::common::utils::get_new_user_pid;
-use crate::noctowl::{NoctowlError};
-use crate::noctowl::lib::Noctowl;
-use crate::noctowl::testing::{get_test_updates, get_test_users};
-
 // -------------------------------------------------------------------------------------------------
 
 #[tokio::main]
@@ -34,7 +36,7 @@ async fn heavy_test(noctowl: &Arc<RwLock<Noctowl>>) -> Result<(), NoctowlError> 
 }
 
 async fn regular_test(noctowl: &Arc<RwLock<Noctowl>>) -> Result<(), NoctowlError> {
-	let mut noctowl = noctowl.write().await;
+	let noctowl = noctowl.write().await;
 
 	// this should happen when the user signs up
 	let user_pid = get_new_user_pid();
@@ -54,8 +56,38 @@ async fn regular_test(noctowl: &Arc<RwLock<Noctowl>>) -> Result<(), NoctowlError
 		clog!("Doc: {}", doc.lock().await)
 	}
 
-	let test_updates = get_test_updates(false, 15);
-	let multithreaded = false;
+	let test_updates = get_test_updates(true, 15);
+	let multithreaded = true;
+	let test_update_scenarios = false;
+
+	if test_update_scenarios {
+		let u0 = test_updates.get(0).unwrap().clone();
+		let u1 = test_updates.get(1).unwrap().clone();
+		let u2 = test_updates.get(2).unwrap().clone();
+		let u3 = test_updates.get(3).unwrap().clone();
+		let u4 = test_updates.get(4).unwrap().clone();
+		let u5 = test_updates.get(5).unwrap().clone();
+		let merged_updates = merge_updates_v1(&vec![u0.as_slice(), u1.as_slice()]).unwrap();
+		let merged_updates2 = merge_updates_v1(&vec![u2.as_slice(), u1.as_slice(), u0.as_slice()]).unwrap();
+		let wrong_data_update = "this data is wrong".as_bytes().to_vec();
+
+		slog!("--------------------------------------------------------------------------------------------------------- START");
+		slog!("--------------------------------------------------------------------------------------------- new update, should apply ");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, u0.clone()).await?;
+		slog!("--------------------------------------------------------------------------------------------- new update, should apply ");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, u1.clone()).await?;
+
+		slog!("-------------------------------------------------------------------------------- old updates, shouldn't apply but return OK");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, merged_updates.clone()).await?;
+		slog!("-------------------------------------------------------------------------------- old updates and new, should apply, return OK");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, merged_updates2).await?;
+		slog!("-------------------------------------------------------------------------------- wrong data, should gracefully fail, return Err");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, wrong_data_update).await?;
+
+		slog!("---------------------------------------------------------------- missing prev update, shouldn't apply, should WAIT and retry");
+		noctowl.update_document(&user_pid, &project_pid, &doc_pid, u4).await?;
+		slog!("--------------------------------------------------------------------------------------------------------- __END");
+	}
 
 	if multithreaded {
 		let mut tasks = Vec::new();
@@ -65,7 +97,7 @@ async fn regular_test(noctowl: &Arc<RwLock<Noctowl>>) -> Result<(), NoctowlError
 			tokio::time::sleep(delay).await;
 
 			let task = task::spawn({
-				let mut noctowl = noctowl.clone();
+				let noctowl = noctowl.clone();
 				let user_pid = user_pid.clone();
 				let project_pid = project_pid.clone();
 				let doc_pid = doc_pid.clone();

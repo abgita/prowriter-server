@@ -13,7 +13,7 @@ use crate::common::utils;
 use crate::nlog;
 use crate::noctowl::db_project::does_document_exist;
 use crate::noctowl::db_utils::{db_exists, get_db_path, create_short_lived_connection_pool};
-use crate::noctowl::document::Document;
+use crate::noctowl::document::{Document, YrsUpdateStatus};
 use crate::noctowl::NoctowlError;
 
 const CREATE_CHECKPOINT_TABLE_QUERY: &str = r#"
@@ -272,14 +272,14 @@ pub async fn get_doc(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error getting specific snapshot", e))?
 	};
-	
+
 	if snapshot.is_none() {
 		tx.rollback().await
 			.map_err(|e| NoctowlError::SqlxError("Error rolling back transaction", e))?;
-		
+
 		return Err(NoctowlError::DocumentNotFound("Document with specified snapshot_id not found".to_string()));
 	}
-	
+
 	let snapshot = snapshot.unwrap();
 
 	// Get associated updates, if any
@@ -472,14 +472,9 @@ pub async fn process_update(
 		{
 			let mut document = doc.lock().await;
 
-			// edge case: if we applied the update already, the prev_state and new_state will be the same
-			// we'll return an error and the client will retry again later
-			// in an endless loop. We need to find a way to check if the update was applied
-			// and break the loop.
+			let (new_state, status) = document.try_atomic_apply_update_and_get(&update);
 
-			let (prev_state, new_state) = document.try_atomic_apply_update_and_get(&update);
-
-			if new_state != prev_state {
+			if let Some(new_state) = new_state {
 				save_doc_update(
 					&doc_db_pool,
 					doc_pid,
@@ -487,11 +482,21 @@ pub async fn process_update(
 					&new_state,
 				).await.unwrap();
 
-				nlog!("Update applied.");
-
 				return Ok(());
-			} else {
-				nlog!("Couldn't apply update. Waiting for previous updates.");
+			}
+
+			if status == YrsUpdateStatus::NoUpdate {
+				return Ok(());
+			}
+
+			if status == YrsUpdateStatus::Failed {
+				nlog!("Update failed.");
+
+				return Err(NoctowlError::DocumentUpdateFailed("YrsUpdateStatus::Failed".to_string()));
+			}
+
+			if status == YrsUpdateStatus::Pending || status == YrsUpdateStatus::Busy {
+				nlog!("Update pending. Retrying in {}ms.", delay);
 			}
 		}
 
