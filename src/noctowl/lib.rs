@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,10 +10,10 @@ use tokio::time::Instant;
 
 use crate::common::utils;
 use crate::noctowl::{NoctowlError, NoctowlStatus};
-use crate::noctowl::db_document::{get_doc_db_connection, get_document, process_update};
+use crate::noctowl::db_document::{DocUpdate, get_all_updates, get_doc_db_connection, get_document, process_update};
 use crate::noctowl::db_main::{create_project, get_project_by_pid, get_projects_by_user_pid, load_main_db, Project};
 use crate::noctowl::db_project::{create_document, DocRow, FolderRow, get_project_content, get_project_db_connection, insert_folder};
-use crate::noctowl::document::Document;
+use crate::noctowl::document::{Document, YrsUpdateStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectContent {
@@ -203,6 +202,33 @@ impl Noctowl {
 		Ok((project, NoctowlStatus::Ok))
 	}
 
+	pub async fn get_all_document_updates(
+		&self,
+		user_pid: &str,
+		project_pid: &str,
+		doc_pid: &str,
+	) -> Result<Vec<DocUpdate>, NoctowlError> {
+		let project_connection = get_project_db_connection(
+			&self.main_db,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&user_pid,
+			&project_pid,
+		).await?;
+
+		let doc_connection = get_doc_db_connection(
+			&project_connection,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&doc_pid,
+			&user_pid,
+		).await?;
+
+		return get_all_updates(&doc_connection).await;
+	}
+
 	pub async fn get_document(
 		&self,
 		user_pid: &str,
@@ -250,7 +276,7 @@ impl Noctowl {
 		project_pid: &str,
 		doc_pid: &str,
 		update: Vec<u8>,
-	) -> Result<NoctowlStatus, NoctowlError> {
+	) -> Result<YrsUpdateStatus, NoctowlError> {
 		let project_connection = get_project_db_connection(
 			&self.main_db,
 			&self.connection_pools,
@@ -260,7 +286,7 @@ impl Noctowl {
 			&project_pid,
 		).await?;
 
-		process_update(
+		let status = process_update(
 			&update,
 			&self.docs_cache,
 			&self.access_map,
@@ -272,7 +298,7 @@ impl Noctowl {
 			&self.connection_pools,
 		).await?;
 
-		Ok(NoctowlStatus::Ok)
+		Ok(status)
 	}
 
 	pub async fn clean_up(&self) {
@@ -286,27 +312,27 @@ impl Noctowl {
 		self.docs_cache.write().await.clear();
 		self.main_db.close().await;
 	}
+}
 
-	pub async fn clean_up_stale_connections_task(&self) {
-		let sleep_duration = Duration::from_secs(60 * 15);
-		let expiration_duration = Duration::from_secs(60 * 30);
+pub async fn clean_up_stale_connections_task(noctowl: Arc<Noctowl>) {
+	let sleep_duration = Duration::from_secs(60 * 15);
+	let expiration_duration = Duration::from_secs(60 * 30);
 
-		loop {
-			tokio::time::sleep(sleep_duration).await;
+	loop {
+		tokio::time::sleep(sleep_duration).await;
 
-			let cloned_map = {
-				let map = self.access_map.read().await;
-				map.clone()
-			};
+		let cloned_map = {
+			let map = noctowl.access_map.read().await;
+			map.clone()
+		};
 
-			for (key, last_access) in cloned_map.iter() {
-				if last_access.elapsed() > expiration_duration {
-					let mut connection_pools_write = self.connection_pools.write().await;
-					let mut access_map_write = self.access_map.write().await;
+		for (key, last_access) in cloned_map.iter() {
+			if last_access.elapsed() > expiration_duration {
+				let mut connection_pools_write = noctowl.connection_pools.write().await;
+				let mut access_map_write = noctowl.access_map.write().await;
 
-					connection_pools_write.remove(key);
-					access_map_write.remove(key);
-				}
+				connection_pools_write.remove(key);
+				access_map_write.remove(key);
 			}
 		}
 	}

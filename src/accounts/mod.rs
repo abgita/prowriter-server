@@ -55,6 +55,10 @@ impl Accounts {
 			google_client_id,
 		})
 	}
+
+	pub async fn close(&self) {
+		self.db.close().await;
+	}
 }
 
 #[derive(Debug)]

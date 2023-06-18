@@ -1,18 +1,18 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 
 use log::LevelFilter;
+use serde::{Deserialize, Serialize};
 use sqlx::{Connection, ConnectOptions, Pool, Sqlite, SqlitePool};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
+use crate::{nlog};
 use crate::common::utils;
-use crate::nlog;
 use crate::noctowl::db_project::does_document_exist;
-use crate::noctowl::db_utils::{db_exists, get_db_path, create_short_lived_connection_pool};
+use crate::noctowl::db_utils::{create_short_lived_connection_pool, db_exists, get_db_path};
 use crate::noctowl::document::{Document, YrsUpdateStatus};
 use crate::noctowl::NoctowlError;
 
@@ -370,13 +370,8 @@ pub async fn save_doc_update(
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Error getting latest snapshot id", e))?;
 
-	// this should come from a env variable
-	let max_updates_for_each_snapshot = 150;
-
-	let mut new_latest_snapshot_id = latest_snapshot_id;
-	let mut new_updates_for_current_snapshot = updates_for_current_snapshot;
-
-	if updates_for_current_snapshot < max_updates_for_each_snapshot {
+	// First let's insert the update to the current snapshot
+	{
 		sqlx::query(
 			r#"
             INSERT INTO updates (snapshot_id, created_at, update_data)
@@ -389,9 +384,29 @@ pub async fn save_doc_update(
 			.execute(&mut tx)
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error inserting into updates table", e))?;
+	}
 
-		new_updates_for_current_snapshot += 1;
+	// this should come from a env variable
+	let max_updates_for_each_snapshot = 150;
+
+	// If we haven't reached the max number of updates for the current snapshot, we only update the doc table
+	if updates_for_current_snapshot < max_updates_for_each_snapshot {
+		sqlx::query(
+			r#"
+        UPDATE doc
+        SET updates_for_current_snapshot = ?, last_modified = ?
+        WHERE doc_pid = ?
+    "#,
+		)
+			.bind(updates_for_current_snapshot + 1)
+			.bind(current_timestamp)
+			.bind(&doc_pid)
+			.execute(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
 	} else {
+		// Otherwise we also insert a new snapshot and reset the updates_for_current_snapshot counter
+
 		let snapshot_data = full_doc_state;
 
 		let res = sqlx::query(
@@ -406,24 +421,24 @@ pub async fn save_doc_update(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error inserting into snapshots table", e))?;
 
-		new_latest_snapshot_id = res.last_insert_rowid();
-		new_updates_for_current_snapshot = 0;
-	}
+		let new_latest_snapshot_id = res.last_insert_rowid();
+		let new_updates_for_current_snapshot = 0;
 
-	sqlx::query(
-		r#"
+		sqlx::query(
+			r#"
         UPDATE doc
         SET latest_snapshot_id = ?, updates_for_current_snapshot = ?, last_modified = ?
         WHERE doc_pid = ?
     "#,
-	)
-		.bind(new_latest_snapshot_id)
-		.bind(new_updates_for_current_snapshot)
-		.bind(current_timestamp)
-		.bind(&doc_pid)
-		.execute(&mut tx)
-		.await
-		.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
+		)
+			.bind(new_latest_snapshot_id)
+			.bind(new_updates_for_current_snapshot)
+			.bind(current_timestamp)
+			.bind(&doc_pid)
+			.execute(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
+	}
 
 	tx.commit().await
 		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
@@ -441,7 +456,7 @@ pub async fn process_update(
 	project_pid: &str,
 	project_db_pool: &Pool<Sqlite>,
 	docs_db_pool: &Arc<RwLock<HashMap<String, SqlitePool>>>,
-) -> Result<(), NoctowlError> {
+) -> Result<YrsUpdateStatus, NoctowlError> {
 	nlog!(
 		"POST:api/v1/projects/{}/docs/{}/update - success",
 		project_pid,
@@ -474,29 +489,25 @@ pub async fn process_update(
 
 			let (new_state, status) = document.try_atomic_apply_update_and_get(&update);
 
-			if let Some(new_state) = new_state {
-				save_doc_update(
-					&doc_db_pool,
-					doc_pid,
-					&update,
-					&new_state,
-				).await.unwrap();
-
-				return Ok(());
-			}
-
-			if status == YrsUpdateStatus::NoUpdate {
-				return Ok(());
-			}
-
 			if status == YrsUpdateStatus::Failed {
 				nlog!("Update failed.");
 
 				return Err(NoctowlError::DocumentUpdateFailed("YrsUpdateStatus::Failed".to_string()));
 			}
 
-			if status == YrsUpdateStatus::Pending || status == YrsUpdateStatus::Busy {
+			if status == YrsUpdateStatus::Busy {
 				nlog!("Update pending. Retrying in {}ms.", delay);
+			} else {
+				if let Some(new_state) = new_state {
+					save_doc_update(
+						&doc_db_pool,
+						doc_pid,
+						&update,
+						&new_state,
+					).await.unwrap();
+				}
+
+				return Ok(status);
 			}
 		}
 
@@ -633,4 +644,15 @@ pub async fn save_checkpoint(
 		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
 
 	Ok(())
+}
+
+pub async fn get_all_updates(
+	doc_db_pool: &Pool<Sqlite>
+) -> Result<Vec<DocUpdate>, NoctowlError> {
+	let rows: Vec<DocUpdate> = sqlx::query_as("SELECT * FROM updates")
+		.fetch_all(doc_db_pool)
+		.await
+		.map_err(|e| NoctowlError::SqlxError("Failed to get all updates", e))?;
+
+	Ok(rows)
 }

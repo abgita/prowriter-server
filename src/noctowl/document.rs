@@ -37,12 +37,20 @@ impl Document {
 		snapshot: DocSnapshot,
 		updates: Option<Vec<DocUpdate>>
 	) -> Self {
-		let mut doc = Document::new(name);
+		let doc = Document::new(name);
 
-		doc.apply_update(&snapshot.snapshot_data);
+		{
+			let mut tx = doc.ydoc
+				.try_transact_mut().expect("another transaction is in progress");
 
-		if let Some(updates) = updates {
-			doc.apply_updates(updates);
+			tx.apply_update(Update::decode_v1(&snapshot.snapshot_data).unwrap());
+
+			if let Some(updates) = updates {
+				let messages: Vec<&[u8]> = updates.iter().map(|update| update.update_data.as_ref()).collect();
+				let merged_updates = merge_updates_v1(&messages).unwrap();
+
+				tx.apply_update(Update::decode_v1(&merged_updates).unwrap());
+			}
 		}
 
 		doc
@@ -53,12 +61,6 @@ impl Document {
 			.try_transact()
 			.expect("another read-write transaction is in progress")
 			.encode_state_as_update_v1(&StateVector::default())
-	}
-
-	pub fn apply_update(&mut self, message: &Vec<u8>) {
-		self.ydoc
-			.try_transact_mut().expect("another transaction is in progress")
-			.apply_update(Update::decode_v1(message).unwrap());
 	}
 
 	pub fn try_atomic_apply_update_and_get(
@@ -99,6 +101,7 @@ impl Document {
 		} else if !are_sv_equal && are_updates_equal {
 			YrsUpdateStatus::Pending
 		} else {
+			// I don't know how to treat this state
 			YrsUpdateStatus::Failed
 		};
 
@@ -109,26 +112,6 @@ impl Document {
 		};
 
 		(state, status)
-	}
-
-	pub fn apply_updates(&mut self, messages: Vec<DocUpdate>) {
-		// we should measure which is or more correct and faster later
-		let should_merge_updates = true;
-
-		if should_merge_updates {
-			let messages: Vec<&[u8]> = messages.iter().map(|update| update.update_data.as_ref()).collect();
-			let merged_updates = merge_updates_v1(&messages).unwrap();
-
-			self.ydoc
-				.transact_mut()
-				.apply_update(Update::decode_v1(&merged_updates).unwrap());
-		} else {
-			for message in messages {
-				self.ydoc
-					.transact_mut()
-					.apply_update(Update::decode_v1(&message.update_data).unwrap());
-			}
-		}
 	}
 }
 

@@ -1,12 +1,9 @@
-pub mod storage;
-pub mod fs_storage;
-pub mod doc_manager;
-pub mod testing;
+mod testing;
 pub mod db_main;
 pub mod db_project;
 pub mod db_document;
 mod db_utils;
-mod document;
+pub mod document;
 pub mod lib;
 
 use std::fmt::{Debug, Display, Formatter};

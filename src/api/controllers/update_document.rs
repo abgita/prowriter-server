@@ -6,9 +6,9 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
+use crate::noctowl::document::YrsUpdateStatus;
 
 use crate::noctowl::lib::{Noctowl};
-use crate::noctowl::NoctowlStatus;
 use crate::slog;
 
 pub async fn update_document(
@@ -27,7 +27,7 @@ pub async fn update_document(
 			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update document"))
 		})?;
 
-	if status != NoctowlStatus::Ok {
+	if status == YrsUpdateStatus::Failed {
 		return Err(custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update document")));
 	}
 
