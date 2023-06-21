@@ -7,6 +7,7 @@ use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
 use crate::api::controllers::get_project::DocResponse;
+use crate::nlog;
 
 use crate::noctowl::lib::Noctowl;
 use crate::noctowl::NoctowlStatus;
@@ -39,12 +40,14 @@ pub async fn create_document(
 		folder_id,
 	).await
 		.map_err(|e| {
-			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create folder"))
+			nlog!("Error creating document: {:?}", e);
+
+			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create document"))
 		})?;
 
 	if status != NoctowlStatus::Ok {
 		return Err(
-			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create folder"))
+			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create document"))
 		);
 	}
 

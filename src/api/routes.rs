@@ -50,7 +50,7 @@ pub fn get_routes(
 		.and_then(get_document);
 
 	let update_document = warp::path!(String / "docs" / String / "update")
-		.and(warp::post())
+		.and(warp::put())
 		.and(jwt::jwt_auth_filter())
 		.and(with_noctowl(noctowl.clone()))
 		.and(warp::header::exact("content-type", "application/octet-stream"))

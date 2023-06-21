@@ -16,8 +16,6 @@ macro_rules! nlog {
 #[derive(PartialEq, Debug)]
 pub enum NoctowlStatus {
 	Ok,
-	UserAlreadyExists,
-	UserNotFound,
 	ProjectAlreadyExists,
 	ProjectNotFound,
 	DocumentAlreadyExists,

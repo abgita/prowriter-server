@@ -2,6 +2,7 @@ use std::fmt::{Debug, Display, Formatter};
 use yrs::{merge_updates_v1, ReadTxn, StateVector, Transact, Update};
 use yrs::types::ToJson;
 use yrs::updates::decoder::Decode;
+use yrs::updates::encoder::Encode;
 use crate::{nlog};
 use crate::noctowl::db_document::{DocSnapshot, DocUpdate};
 
@@ -11,10 +12,10 @@ pub struct Document {
 	pub ydoc: yrs::Doc
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum YrsUpdateStatus {
 	Updated,
-	Pending,
+	Pending(Vec<u8>),
 	Busy,
 	NoUpdate,
 	Failed,
@@ -99,7 +100,10 @@ impl Document {
 		} else if are_sv_equal && are_updates_equal {
 			YrsUpdateStatus::NoUpdate
 		} else if !are_sv_equal && are_updates_equal {
-			YrsUpdateStatus::Pending
+			// if there are missing updates, we send the client our state vector
+			let sv = tx.state_vector().encode_v1();
+
+			YrsUpdateStatus::Pending(sv)
 		} else {
 			// I don't know how to treat this state
 			YrsUpdateStatus::Failed

@@ -94,7 +94,6 @@ macro_rules! aclog {
 
 pub enum AccountsError {
 	Error(&'static str, Box<dyn std::error::Error + Send + Sync>),
-	IoError(String),
 	SqlxError(&'static str, sqlx::Error),
 	SqlxErrorClosingConnection(sqlx::Error),
 }
@@ -103,7 +102,6 @@ impl Display for AccountsError {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		match self {
 			AccountsError::Error(s, e) => write!(f, "{}: {}", s, e),
-			AccountsError::IoError(s) => write!(f, "{}", s),
 			AccountsError::SqlxError(s, e) => write!(f, "{}: {}", s, e),
 			AccountsError::SqlxErrorClosingConnection(e) => write!(f, "Error closing connection: {}", e),
 		}
