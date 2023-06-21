@@ -241,15 +241,28 @@ pub async fn get_project_by_pid(
 	main_db: &Pool<Sqlite>,
 	project_pid: &str,
 ) -> Result<Option<Project>, NoctowlError> {
-	let row: Option<Project> = sqlx::query_as(
-		r#"
-        SELECT * FROM projects WHERE project_pid = ?
-        "#,
-	)
+	let mut tx = main_db.begin().await
+		.map_err(|e| NoctowlError::SqlxError("Failed to begin transaction", e))?;
+
+	let row: Option<Project> = sqlx::query_as("SELECT * FROM projects WHERE project_pid = ?")
 		.bind(project_pid)
-		.fetch_optional(main_db)
+		.fetch_optional(&mut tx)
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Failed to get project", e))?;
+
+	if row.is_some() {
+		let current_timestamp = utils::current_timestamp_secs() as i64;
+
+		sqlx::query("UPDATE projects SET last_accessed = ? WHERE project_pid = ?")
+			.bind(current_timestamp)
+			.bind(project_pid)
+			.execute(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Failed to update project last accessed", e))?;
+	}
+
+	tx.commit().await
+		.map_err(|e| NoctowlError::SqlxError("Failed to commit transaction", e))?;
 
 	Ok(row)
 }
