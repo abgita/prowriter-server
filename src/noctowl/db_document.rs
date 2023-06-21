@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use log::LevelFilter;
@@ -453,16 +454,9 @@ pub async fn process_update(
 	users_dir: &str,
 	doc_pid: &str,
 	user_pid: &str,
-	project_pid: &str,
 	project_db_pool: &Pool<Sqlite>,
 	docs_db_pool: &Arc<RwLock<HashMap<String, SqlitePool>>>,
 ) -> Result<YrsUpdateStatus, NoctowlError> {
-	nlog!(
-		"POST:api/v1/projects/{}/docs/{}/update - success",
-		project_pid,
-		doc_pid
-	);
-
 	let doc_db_pool = get_doc_db_connection(
 		&project_db_pool,
 		&docs_db_pool,
@@ -487,7 +481,20 @@ pub async fn process_update(
 		{
 			let mut document = doc.lock().await;
 
-			let (new_state, status) = document.try_atomic_apply_update_and_get(&update);
+			let (new_state, status) = match catch_unwind(AssertUnwindSafe(|| {
+				document.try_atomic_apply_update_and_get(&update)
+			})) {
+				Ok(res) => res,
+				Err(e) => {
+					// cuando pasa esto, tendríamos que decirle al cliente
+					// que nos pase el estado completo, y generamos un snapshot nuevo
+					// probamos hasta cuál update se puede aplicar al snapshot anterior
+					// y borramos las updates corruptas.
+					nlog!("Error applying update: {:?}", e);
+
+					return Err(NoctowlError::DocumentUpdateFailed("Error applying update".to_string()));
+				}
+			};
 
 			if status == YrsUpdateStatus::Failed {
 				nlog!("Update failed.");

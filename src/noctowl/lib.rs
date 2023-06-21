@@ -293,7 +293,6 @@ impl Noctowl {
 			&self.options.users_dir,
 			&doc_pid,
 			&user_pid,
-			&project_pid,
 			&project_connection,
 			&self.connection_pools,
 		).await?;

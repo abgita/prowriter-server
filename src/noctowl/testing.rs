@@ -6,10 +6,9 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use tokio::{fs, task};
 use tokio::sync::{Mutex, RwLock};
-use yrs::{merge_updates_v1, Options, ReadTxn, StateVector, Text, Transact, TransactionMut, Update, Uuid, XmlTextRef};
+use yrs::{merge_updates_v1,Options, ReadTxn, StateVector, Text, Transact, TransactionMut, Update, Uuid, XmlTextRef};
 use yrs::types::ToJson;
 use yrs::updates::decoder::Decode;
-use yrs::updates::encoder::Encode;
 
 use crate::common::utils::get_new_user_pid;
 use crate::noctowl::db_document::DocUpdate;
@@ -472,7 +471,7 @@ async fn simple_simulation_test() -> Result<(), NoctowlError> {
 				&doc_pid,
 				third_update.clone(),
 			).await {
-				Ok(YrsUpdateStatus::Pending) => println!("The update status is 'Pending' as expected"),
+				Ok(YrsUpdateStatus::Pending(_)) => println!("The update status is 'Pending' as expected"),
 				Ok(status) => panic!("The update status should have been 'Pending', but was: {:?}", status),
 				Err(e) => panic!("This shouldn't have failed: {}", e),
 			}
@@ -503,28 +502,27 @@ async fn simple_simulation_test() -> Result<(), NoctowlError> {
 			let fifth_update = updates[4].clone();
 			let _sixth_update = updates[5].clone();
 
-			match noctowl.update_document(
+			let server_sv = match noctowl.update_document(
 				&user_pid,
 				&project_pid,
 				&doc_pid,
 				fifth_update.clone(),
 			).await {
-				Ok(YrsUpdateStatus::Pending) => println!("The update status is 'Pending' as expected"),
+				Ok(YrsUpdateStatus::Pending(sv)) => {
+					println!("The update status is 'Pending' as expected");
+
+					sv
+				},
 				Ok(status) => panic!("The update status should have been 'Pending', but was: {:?}", status),
 				Err(e) => panic!("This shouldn't have failed: {}", e),
-			}
+			};
 
 			// let's say the client "lost" the fourth update
 			// it won't be able to merge its updates, in that case, it will ask for a state vector to the server
 
 			{
-				let (doc, _) = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await.unwrap();
-				let doc = doc.unwrap();
-				let doc = doc.lock().await;
-
-				let server_sv = doc.ydoc.transact().state_vector();
-
-				println!("server_sv: {:?}", server_sv.encode_v1());
+				println!("server_sv: {:?}", server_sv);
+				let server_sv = StateVector::decode_v1(&*server_sv).unwrap();
 
 				// the clients returns the diff between the server state vector and its own
 				let diff_update = {
@@ -540,8 +538,6 @@ async fn simple_simulation_test() -> Result<(), NoctowlError> {
 					tx.apply_update(update);
 					tx.encode_diff_v1(&server_sv)
 				};
-
-				drop(doc);
 
 				/*println!("fourth_update: {:?}", fourth_update);
 				println!("fifth_update: {:?}", fifth_update);
