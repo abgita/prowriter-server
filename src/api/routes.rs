@@ -5,7 +5,7 @@ use warp::{Filter, Rejection, Reply};
 
 use crate::accounts::{jwt};
 use crate::api::controllers::{create_document, create_folder, create_project, get_document, get_project, get_projects, update_document};
-use crate::api::controllers::get_document::GetDocumentParams;
+use crate::api::controllers::get_document::{get_prev_document, GetDocumentParams};
 use crate::noctowl::lib::Noctowl;
 
 fn with_noctowl(
@@ -49,6 +49,13 @@ pub fn get_routes(
 		.and(with_noctowl(noctowl.clone()))
 		.and_then(get_document);
 
+	// projects/{project_pid}/docs/{doc_pid}
+	let get_prev_document = warp::path!(String / "docs" / String / i32)
+		.and(warp::post())
+		.and(jwt::jwt_auth_filter())
+		.and(with_noctowl(noctowl.clone()))
+		.and_then(get_prev_document);
+
 	let update_document = warp::path!(String / "docs" / String / "update")
 		.and(warp::put())
 		.and(jwt::jwt_auth_filter())
@@ -78,6 +85,7 @@ pub fn get_routes(
 				.or(create_folder)
 				.or(create_document)
 				.or(get_document)
+				.or(get_prev_document)
 				.or(update_document)
 				.or(get_project))
 		.or(warp::path("users")

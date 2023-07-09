@@ -349,6 +349,60 @@ pub async fn get_document(
 	}
 }
 
+pub async fn get_previous_document(
+	doc_db_pool: &Pool<Sqlite>,
+	docs_cache: &Arc<RwLock<HashMap<String, Arc<Mutex<Document>>>>>,
+	doc_pid: &str,
+	prev_amount: i32,
+) -> Result<Arc<Mutex<Document>>, NoctowlError> {
+	let mut tx = doc_db_pool.begin().await
+		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
+
+	let doc_info: DocInfo = sqlx::query_as("SELECT * FROM doc WHERE doc_pid = ?")
+		.bind(doc_pid)
+		.fetch_one(&mut tx)
+		.await
+		.map_err(|e| NoctowlError::SqlxError("Error getting doc info", e))?;
+
+	let updates_for_current_snapshot = doc_info.updates_for_current_snapshot as i32;
+
+	let (prev_snap_id, prev_update_index) = if updates_for_current_snapshot > prev_amount {
+		(Some(doc_info.latest_snapshot_id), Some((updates_for_current_snapshot - prev_amount) as i64))
+	} else {
+		let prev_snap_id = if doc_info.latest_snapshot_id > 1 {
+			Some(doc_info.latest_snapshot_id - 1)
+		} else {
+			None
+		};
+
+		let prev_update_index: Option<i64> = sqlx::query_scalar(
+			"SELECT MAX(update_index) FROM updates WHERE snapshot_id = ?"
+		).bind(prev_snap_id.unwrap_or(-1))
+			.fetch_optional(&mut tx).await
+			.map_err(|e| NoctowlError::SqlxError("Error getting latest update index for the previous snapshot", e))?;
+
+		let prev_update_index = if prev_update_index.is_some() {
+			let prev_amount = prev_amount - updates_for_current_snapshot;
+			let prev_update_index = prev_update_index.unwrap();
+
+			if prev_update_index > prev_amount as i64 {
+				Some(prev_update_index - prev_amount as i64)
+			} else {
+				Some(prev_update_index)
+			}
+		} else {
+			None
+		};
+
+		(prev_snap_id, prev_update_index)
+	};
+
+	tx.commit().await
+		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
+
+	get_document(doc_db_pool, docs_cache, doc_pid, &prev_snap_id, &prev_update_index).await
+}
+
 pub async fn save_doc_update(
 	doc_db_pool: &Pool<Sqlite>,
 	doc_pid: &str,

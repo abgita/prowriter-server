@@ -65,3 +65,48 @@ pub async fn get_document(
 		StatusCode::OK,
 	))
 }
+
+pub async fn get_prev_document(
+	project_pid: String,
+	doc_pid: String,
+	prev_amount: i32,
+	user_pid: String,
+	noctowl: Arc<Noctowl>,
+) -> Result<WithStatus<WithHeader<Vec<u8>>>, Rejection> {
+	let (document, status) = noctowl.get_prev_document(
+		&user_pid,
+		&project_pid,
+		&doc_pid,
+		prev_amount
+	).await
+		.map_err(|e| {
+			slog!("Error getting document: {:?}", e);
+
+			custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get document"))
+		})?;
+
+	if status != NoctowlStatus::Ok {
+		if status == NoctowlStatus::DocumentNotFound {
+			return Err(custom(CustomError::single(StatusCode::NOT_FOUND, "Document not found")));
+		}
+
+		return Err(custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get document")));
+	}
+
+	let document = document.unwrap();
+
+	let doc_state = {
+		let document = document.lock().await;
+
+		document.get_doc_state()
+	};
+
+	Ok(reply::with_status(
+		reply::with_header(
+			doc_state,
+			"Content-Type",
+			"application/octet-stream",
+		),
+		StatusCode::OK,
+	))
+}

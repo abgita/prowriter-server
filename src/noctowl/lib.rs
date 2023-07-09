@@ -10,7 +10,7 @@ use tokio::time::Instant;
 
 use crate::common::utils;
 use crate::noctowl::{NoctowlError, NoctowlStatus};
-use crate::noctowl::db_document::{DocUpdate, get_all_updates, get_doc_db_connection, get_document, process_update};
+use crate::noctowl::db_document::{DocUpdate, get_all_updates, get_doc_db_connection, get_document, get_previous_document, process_update};
 use crate::noctowl::db_main::{create_project, get_project_by_pid, get_projects_by_user_pid, load_main_db, Project};
 use crate::noctowl::db_project::{create_document, DocRow, FolderRow, get_project_content, get_project_db_connection, insert_folder};
 use crate::noctowl::document::{Document, YrsUpdateStatus};
@@ -261,6 +261,45 @@ impl Noctowl {
 			&doc_pid,
 			&snapshot_id,
 			&update_index,
+		).await {
+			Ok(doc) => Ok((Some(doc), NoctowlStatus::Ok)),
+			Err(e) => match e {
+				NoctowlError::DocumentNotFound(_) => Ok((None, NoctowlStatus::DocumentNotFound)),
+				_ => Err(e),
+			}
+		}
+	}
+
+	pub async fn get_prev_document(
+		&self,
+		user_pid: &str,
+		project_pid: &str,
+		doc_pid: &str,
+		prev_amount: i32,
+	) -> Result<(Option<Arc<Mutex<Document>>>, NoctowlStatus), NoctowlError> {
+		let project_connection = get_project_db_connection(
+			&self.main_db,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&user_pid,
+			&project_pid,
+		).await?;
+
+		let doc_connection = get_doc_db_connection(
+			&project_connection,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&doc_pid,
+			&user_pid,
+		).await?;
+
+		match get_previous_document(
+			&doc_connection,
+			&self.docs_cache,
+			&doc_pid,
+			prev_amount
 		).await {
 			Ok(doc) => Ok((Some(doc), NoctowlStatus::Ok)),
 			Err(e) => match e {
