@@ -64,7 +64,7 @@ pub async fn create_folder(
 			folder_id: folder_row.folder_id,
 			folder_name,
 			folder_icon,
-			parent_folder_id,
+			parent_folder_id: folder_row.parent_folder_id,
 			locked: folder_row.locked == 1,
 			position: folder_row.position,
 		}),
