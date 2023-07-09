@@ -9,6 +9,7 @@ use crate::accounts::CustomError;
 use crate::api::controllers::get_project::FolderResponse;
 
 use crate::noctowl::lib::Noctowl;
+use crate::noctowl::lib::constants::{ICON_STRING_MAX_LENGTH, MIN_FOLDER_ID, PROJECT_PID_LENGTH};
 use crate::noctowl::NoctowlStatus;
 use crate::slog;
 
@@ -32,8 +33,8 @@ pub async fn create_folder(
 		parent_folder_id,
 	} = request;
 
-	if project_pid.len() != 6 {
-		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Wrong project_pid")));
+	if project_pid.len() != PROJECT_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid project_pid")));
 	}
 
 	if folder_name.is_empty() {
@@ -41,14 +42,18 @@ pub async fn create_folder(
 	}
 
 	if let Some(parent_folder_id) = parent_folder_id {
-		if parent_folder_id < 2 {
-			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid parent folder ID. Min value is 2")));
+		if parent_folder_id < MIN_FOLDER_ID {
+			let message: String = format!("Invalid parent_folder_id. Min value is {}", MIN_FOLDER_ID);
+
+			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, message.as_str())));
 		}
 	}
 
 	if let Some(folder_icon) = folder_icon.clone() {
-		if folder_icon.len() > 2 {
-			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid folder_icon. Max length is 2")));
+		if folder_icon.len() > ICON_STRING_MAX_LENGTH {
+			let message: String = format!("Invalid folder_icon. Max length is {}", ICON_STRING_MAX_LENGTH);
+
+			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, message.as_str())));
 		}
 	}
 

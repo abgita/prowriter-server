@@ -29,6 +29,10 @@ pub async fn create_project(
 ) -> Result<WithStatus<Json>, Rejection> {
 	let project_name = request.project_name;
 
+	if project_name.is_empty() {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "project_name cannot be empty")));
+	}
+
 	let (project_pid, status) = noctowl.create_project(&user_pid, project_name.as_str()).await
 		.map_err(|e| {
 			slog!("Failed to create project: {}", e);

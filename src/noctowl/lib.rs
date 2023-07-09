@@ -37,6 +37,15 @@ pub struct Noctowl {
 	access_map: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
+pub mod constants {
+	use crate::noctowl::db_project::ROOT_FOLDER_ID;
+
+	pub const PROJECT_PID_LENGTH: usize = 6;
+	pub const DOC_PID_LENGTH: usize = 36;
+	pub const ICON_STRING_MAX_LENGTH: usize = 2;
+	pub const MIN_FOLDER_ID: i32 = ROOT_FOLDER_ID;
+}
+
 impl Noctowl {
 	pub async fn new(storage_dir: Option<String>) -> Result<Self, NoctowlError> {
 		let storage_dir = storage_dir.unwrap_or(".storage".to_string());

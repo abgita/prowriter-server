@@ -74,7 +74,7 @@ pub struct DocRow {
 	pub position: i32,
 }
 
-const ROOT_FOLDER_ID: i32 = 2;
+pub const ROOT_FOLDER_ID: i32 = 2;
 
 pub async fn create_project_db(
 	file_path: &str,

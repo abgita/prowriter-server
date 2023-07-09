@@ -8,6 +8,7 @@ use warp::reply::{WithHeader, WithStatus};
 use crate::accounts::CustomError;
 
 use crate::noctowl::lib::{Noctowl};
+use crate::noctowl::lib::constants::{DOC_PID_LENGTH, PROJECT_PID_LENGTH};
 use crate::noctowl::NoctowlStatus;
 use crate::slog;
 
@@ -26,6 +27,14 @@ pub async fn get_document(
 ) -> Result<WithStatus<WithHeader<Vec<u8>>>, Rejection> {
 	let snapshot_id = query.s;
 	let update_index = query.u;
+
+	if project_pid.len() != PROJECT_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid project_pid")));
+	}
+
+	if doc_pid.len() != DOC_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid doc_pid")));
+	}
 
 	let (document, status) = noctowl.get_document(
 		&user_pid,
@@ -73,6 +82,18 @@ pub async fn get_prev_document(
 	user_pid: String,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<WithHeader<Vec<u8>>>, Rejection> {
+	if project_pid.len() != PROJECT_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid project_pid")));
+	}
+
+	if doc_pid.len() != DOC_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid doc_pid")));
+	}
+
+	if prev_amount < 0 || prev_amount > 256 {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid prev_amount")));
+	}
+
 	let (document, status) = noctowl.get_prev_document(
 		&user_pid,
 		&project_pid,

@@ -8,6 +8,7 @@ use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
 
 use crate::noctowl::lib::{Noctowl};
+use crate::noctowl::lib::constants::PROJECT_PID_LENGTH;
 use crate::noctowl::NoctowlStatus;
 use crate::slog;
 
@@ -60,6 +61,10 @@ pub async fn get_project(
 	user_pid: String,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<Json>, Rejection> {
+	if project_pid.len() != PROJECT_PID_LENGTH {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid project_pid")));
+	}
+
 	let (content, status) = noctowl.get_project(&user_pid, &project_pid).await
 		.map_err(|e| {
 			slog!("Error getting project: {:?}", e);
