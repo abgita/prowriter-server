@@ -32,9 +32,23 @@ pub async fn create_folder(
 		parent_folder_id,
 	} = request;
 
+	if project_pid.len() != 6 {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Wrong project_pid")));
+	}
+
+	if folder_name.is_empty() {
+		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "folder_name cannot be empty")));
+	}
+
 	if let Some(parent_folder_id) = parent_folder_id {
 		if parent_folder_id < 2 {
 			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid parent folder ID. Min value is 2")));
+		}
+	}
+
+	if let Some(folder_icon) = folder_icon.clone() {
+		if folder_icon.len() > 2 {
+			return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid folder_icon. Max length is 2")));
 		}
 	}
 
