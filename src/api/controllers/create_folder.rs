@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 use crate::api::controllers::get_project::FolderResponse;
 
 use crate::noctowl::lib::Noctowl;
@@ -23,10 +24,12 @@ pub struct NewFolderRequest {
 
 pub async fn create_folder(
 	project_pid: String,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 	request: NewFolderRequest,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
+
 	let NewFolderRequest {
 		folder_name,
 		folder_icon,

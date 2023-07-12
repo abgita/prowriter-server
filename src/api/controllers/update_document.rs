@@ -11,6 +11,7 @@ use crate::noctowl::document::YrsUpdateStatus;
 
 use crate::noctowl::lib::{Noctowl};
 use crate::{nlog, slog};
+use crate::accounts::jwt::AuthUser;
 
 #[derive(Serialize)]
 pub struct UpdateDocumentResponse {
@@ -20,10 +21,11 @@ pub struct UpdateDocumentResponse {
 pub async fn update_document(
 	project_pid: String,
 	doc_pid: String,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 	body: Bytes
 ) -> Result<WithStatus<WithHeader<Vec<u8>>>, Rejection> {
+	let user_pid = au.user_pid;
 	let update: Vec<u8> = body.iter().map(|b| *b).collect();
 
 	let status = noctowl.update_document(&user_pid, &project_pid, &doc_pid, update).await

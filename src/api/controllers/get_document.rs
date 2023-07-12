@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithHeader, WithStatus};
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 use crate::noctowl::db_document::DocUpdateInfo;
 
 use crate::noctowl::lib::{Noctowl};
@@ -33,9 +34,10 @@ pub async fn get_document(
 	project_pid: String,
 	doc_pid: String,
 	query: GetDocumentParams,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<WithHeader<Vec<u8>>>, Rejection> {
+	let user_pid = au.user_pid;
 	let update_id = query.u;
 
 	if project_pid.len() != PROJECT_PID_LENGTH {
@@ -88,9 +90,11 @@ pub async fn get_document_revisions(
 	project_pid: String,
 	doc_pid: String,
 	query: GetDocumentRevisionsParams,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
+
 	let offset = query.o;
 	let limit = query.l;
 

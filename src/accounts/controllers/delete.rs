@@ -8,6 +8,7 @@ use warp::reject::custom;
 
 use crate::accounts::controllers::google::{RSAPublicKey, validate_google_id_token};
 use crate::accounts::{db, CustomError};
+use crate::accounts::jwt::AuthUser;
 
 #[derive(Debug, Deserialize)]
 pub struct DeleteRequest {
@@ -17,12 +18,14 @@ pub struct DeleteRequest {
 }
 
 pub async fn delete(
-	pid: String,
+	au: AuthUser,
 	request: DeleteRequest,
 	accounts_db: Pool<Sqlite>,
 	public_keys: Arc<RwLock<Vec<RSAPublicKey>>>,
 	google_client_id: String,
 ) -> Result<impl Reply, Rejection> {
+	let user_pid = au.user_pid;
+
 	let no_password = request.password.is_none() || request.password.clone().unwrap().is_empty();
 	let no_id_token = request.id_token.is_none() || request.id_token.clone().unwrap().is_empty();
 
@@ -40,7 +43,7 @@ pub async fn delete(
 			}));
 		}
 
-		let db_user = db::get_user_by_user_pid(&accounts_db, &pid).await
+		let db_user = db::get_user_by_user_pid(&accounts_db, &user_pid).await
 			.map_err(|_| custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get user")))?;
 
 		if let Some(user) = db_user {
@@ -55,7 +58,7 @@ pub async fn delete(
 	} else {
 		let password = request.password.unwrap();
 
-		let db_user = db::get_user_by_user_pid(&accounts_db, &pid).await
+		let db_user = db::get_user_by_user_pid(&accounts_db, &user_pid).await
 			.map_err(|_| custom(CustomError::single(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get user")))?;
 
 		if let Some(user) = db_user {

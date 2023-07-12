@@ -34,10 +34,8 @@ pub fn current_timestamp_ms() -> u128 {
 pub fn get_truncated_uuid() -> String {
     let uuid = Uuid::new_v4();
 
-    // Truncate the UUID to the first 64 bits
     let truncated_uuid = uuid.as_bytes()[..8].to_vec();
 
-    // Encode the truncated UUID as a hexadecimal string
     hex::encode(truncated_uuid)
 }
 
@@ -48,6 +46,7 @@ pub fn get_new_user_pid() -> String {
 pub fn get_short_pid() -> String {
     let uuid = Uuid::new_v4();
     let truncated_uuid = uuid.as_bytes()[..3].to_vec();
+    
     hex::encode(truncated_uuid)
 }
 

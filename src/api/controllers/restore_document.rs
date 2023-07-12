@@ -7,6 +7,7 @@ use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 use crate::noctowl::lib::constants::{DOC_PID_LENGTH, PROJECT_PID_LENGTH};
 use crate::noctowl::lib::Noctowl;
 use crate::noctowl::NoctowlStatus;
@@ -21,9 +22,10 @@ pub async fn restore_document(
 	project_pid: String,
 	doc_pid: String,
 	query: RestoreDocumentParams,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
 	let update_id = query.u;
 
 	if project_pid.len() != PROJECT_PID_LENGTH {

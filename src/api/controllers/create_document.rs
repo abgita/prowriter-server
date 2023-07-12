@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 use crate::api::controllers::get_project::DocResponse;
 use crate::nlog;
 use crate::noctowl::lib::constants::{ICON_STRING_MAX_LENGTH, MIN_FOLDER_ID, PROJECT_PID_LENGTH};
@@ -23,10 +24,12 @@ pub struct NewDocRequest {
 
 pub async fn create_document(
 	project_pid: String,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 	request: NewDocRequest,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
+
 	let NewDocRequest {
 		doc_name,
 		doc_icon,

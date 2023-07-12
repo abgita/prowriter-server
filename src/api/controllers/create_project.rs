@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 
 use crate::noctowl::lib::Noctowl;
 use crate::noctowl::NoctowlStatus;
@@ -23,10 +24,11 @@ pub struct NewProjectResponse {
 }
 
 pub async fn create_project(
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 	request: NewProjectRequest,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
 	let project_name = request.project_name;
 
 	if project_name.is_empty() {

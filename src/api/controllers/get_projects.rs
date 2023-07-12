@@ -7,6 +7,7 @@ use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
 use crate::{slog};
+use crate::accounts::jwt::AuthUser;
 
 use crate::noctowl::lib::Noctowl;
 use crate::noctowl::NoctowlStatus;
@@ -25,9 +26,10 @@ pub struct ProjectsResponse {
 }
 
 pub async fn get_projects(
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
 
 	let (projects, status) = noctowl.get_projects(&user_pid).await
 		.map_err(|e| {

@@ -47,17 +47,14 @@ async fn create_main_db(
 		.connect().await
 		.map_err(|e| NoctowlError::SqlxError("Failed to create main database", e))?;
 
-	// Begin a transaction
 	let mut tx = conn.begin().await
 		.map_err(|e| NoctowlError::SqlxError("Failed to begin transaction", e))?;
-
 
 	sqlx::query(CREATE_PROJECTS_TABLE_QUERY)
 		.execute(&mut tx)
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Failed to create projects table", e))?;
 
-	// Create the index on user_pid
 	sqlx::query(
 		r#"CREATE INDEX IF NOT EXISTS user_pid_idx_projects ON projects (user_pid);"#
 	)
@@ -65,7 +62,6 @@ async fn create_main_db(
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Failed to create index on user_pid", e))?;
 
-	// Create the index on project_pid
 	sqlx::query(
 		r#"CREATE INDEX IF NOT EXISTS project_pid_idx_projects ON projects (project_pid);"#
 	)
@@ -73,7 +69,6 @@ async fn create_main_db(
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Failed to create index on project_pid", e))?;
 
-	// Commit the transaction
 	tx.commit().await
 		.map_err(|e| NoctowlError::SqlxError("Failed to commit transaction", e))?;
 

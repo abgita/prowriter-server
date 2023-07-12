@@ -70,7 +70,6 @@ pub async fn create_accounts_db(
 		.connect().await
 		.map_err(|e| AccountsError::SqlxError("Failed to create main database", e))?;
 
-	// Begin a transaction
 	let mut tx = conn.begin().await
 		.map_err(|e| AccountsError::SqlxError("Failed to begin transaction", e))?;
 
@@ -84,7 +83,6 @@ pub async fn create_accounts_db(
 		.await
 		.map_err(|e| AccountsError::SqlxError("Failed to create refresh_tokens table", e))?;
 
-	// Commit the transaction
 	tx.commit().await
 		.map_err(|e| AccountsError::SqlxError("Failed to commit transaction", e))?;
 

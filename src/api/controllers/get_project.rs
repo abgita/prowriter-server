@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::reject::custom;
 use warp::reply::{Json, WithStatus};
 use crate::accounts::CustomError;
+use crate::accounts::jwt::AuthUser;
 
 use crate::noctowl::lib::{Noctowl};
 use crate::noctowl::lib::constants::PROJECT_PID_LENGTH;
@@ -58,9 +59,11 @@ pub struct GetProjectResponse {
 
 pub async fn get_project(
 	project_pid: String,
-	user_pid: String,
+	au: AuthUser,
 	noctowl: Arc<Noctowl>,
 ) -> Result<WithStatus<Json>, Rejection> {
+	let user_pid = au.user_pid;
+
 	if project_pid.len() != PROJECT_PID_LENGTH {
 		return Err(custom(CustomError::single(StatusCode::BAD_REQUEST, "Invalid project_pid")));
 	}

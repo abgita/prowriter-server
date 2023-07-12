@@ -223,7 +223,7 @@ pub async fn create_doc_db_and_insert(
 
 	let last_snap_id = res.last_insert_rowid();
 
-	// Insert into doc table
+	// insert into doc table
 	sqlx::query(
 		r#"
 			INSERT INTO doc (doc_pid, last_modified, latest_snapshot_id, updates_for_current_snapshot)
@@ -238,7 +238,6 @@ pub async fn create_doc_db_and_insert(
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Error inserting into doc table", e))?;
 
-	// Commit the transaction
 	tx.commit().await
 		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
 
@@ -255,30 +254,27 @@ pub async fn get_doc(
 	doc_pid: &str,
 	update_id: &Option<i64>,
 ) -> Result<(DocSnapshot, Option<Vec<DocUpdate>>), NoctowlError> {
-	// Begin a transaction
 	let mut tx = doc_db_pool.begin().await
 		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
 
-	// Declare variables
 	let snapshot: DocSnapshot;
 	let updates: Vec<DocUpdate>;
 
 	if let Some(update_id) = update_id {
-		// Get the update
 		let update: DocUpdate = sqlx::query_as("SELECT * FROM updates WHERE update_id = ?")
 			.bind(update_id)
 			.fetch_one(&mut tx)
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error getting update", e))?;
 
-		// Get the snapshot this update is part of
+		// get the snapshot this update is part of
 		snapshot = sqlx::query_as("SELECT * FROM snapshots WHERE snapshot_id = ?")
 			.bind(update.snapshot_id)
 			.fetch_one(&mut tx)
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error getting snapshot", e))?;
 
-		// Get all updates up to and including the provided update_id
+		// get all updates up to and including the provided update_id
 		updates = sqlx::query_as(
 			r#"
 				SELECT * FROM updates
@@ -291,7 +287,7 @@ pub async fn get_doc(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?;
 	} else {
-		// Get the latest snapshot
+		// get the latest snapshot
 		snapshot = sqlx::query_as(
 			r#"
 				SELECT * FROM doc
@@ -304,7 +300,7 @@ pub async fn get_doc(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error getting latest snapshot", e))?;
 
-		// Get all updates associated with the latest snapshot
+		// get all updates associated with the latest snapshot
 		updates = sqlx::query_as(
 			r#"
 				SELECT * FROM updates
@@ -392,7 +388,7 @@ pub async fn save_doc_update(
 		.await
 		.map_err(|e| NoctowlError::SqlxError("Error getting latest snapshot id", e))?;
 
-	// First let's insert the update to the current snapshot
+	// insert the update to the current snapshot
 	{
 		sqlx::query(
 			r#"
@@ -411,7 +407,7 @@ pub async fn save_doc_update(
 	// this should come from a env variable
 	let max_updates_for_each_snapshot = 150;
 
-	// If we haven't reached the max number of updates for the current snapshot, we only update the doc table
+	// if we haven't reached the max number of updates for the current snapshot, we only update the doc table
 	if updates_for_current_snapshot < max_updates_for_each_snapshot {
 		sqlx::query(
 			r#"
@@ -427,7 +423,7 @@ pub async fn save_doc_update(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
 	} else {
-		// Otherwise we also insert a new snapshot and reset the updates_for_current_snapshot counter
+		// otherwise we also insert a new snapshot and reset the updates_for_current_snapshot counter
 
 		let snapshot_data = full_doc_state;
 
@@ -557,7 +553,7 @@ pub async fn process_update(
 					// cuando pasa esto, tendríamos que decirle al cliente
 					// que nos pase el estado completo, y generamos un snapshot nuevo
 					// probamos hasta cuál update se puede aplicar al snapshot anterior
-					// y borramos las updates corruptas.
+					// y borramos las updates corruptas
 					nlog!("Error applying update: {:?}", e);
 
 					return Err(NoctowlError::DocumentUpdateFailed("Error applying update".to_string()));
@@ -586,14 +582,11 @@ pub async fn process_update(
 			}
 		}
 
-		// Sleep for delay milliseconds
 		tokio::time::sleep(std::time::Duration::from_millis(delay as u64)).await;
 
-		// Exponential backoff: double the delay for the next iteration
 		delay *= 2;
 	};
 
-	// If we reach this point, all retries have failed.
 	return Err(NoctowlError::DocumentUpdateFailed(doc_pid.to_string()));
 }
 
@@ -602,11 +595,9 @@ pub async fn get_snapshots_between_timestamps(
 	timestamp_since: i64,
 	timestamp_until: i64,
 ) -> Result<Vec<(i64, i64)>, NoctowlError> {
-	// Begin a transaction
 	let mut tx = doc_db_pool.begin().await
 		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
 
-	// Get the snapshots
 	let snapshots: Vec<(i64, i64)> = sqlx::query_as(
 		r#"
 			SELECT snapshot_id, created_at FROM snapshots
@@ -631,11 +622,9 @@ pub async fn get_updates(
 	from_id: i64,
 	amount: usize,
 ) -> Result<Vec<(i64, i64)>, NoctowlError> {
-	// Begin a transaction
 	let mut tx = doc_db_pool.begin().await
 		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
 
-	// Get total updates
 	let total_updates: i64 = sqlx::query_scalar(
 		r#"
         SELECT COUNT(*) FROM updates
@@ -653,7 +642,6 @@ pub async fn get_updates(
 		from_id + amount as i64
 	};
 
-	// Get the updates
 	let updates: Vec<(i64, i64)> = sqlx::query_as(
 		r#"
         SELECT update_id, created_at FROM updates

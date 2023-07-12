@@ -42,16 +42,13 @@ async fn main() -> Result<(), NoctowlError> {
 	let accounts_routes = accounts::routes::get_routes(accounts.clone());
 	let api_routes = api::routes::get_routes(&noctowl);
 
-	// Create a broadcast channel for the shutdown signal
 	let (tx, rx) = oneshot::channel();
 
-	// Capture the Ctrl+C signal to trigger a shutdown
 	let shutdown_signal = tokio::spawn(async {
 		tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C signal");
 		tx.send(()).expect("Failed to send shutdown signal");
 	});
 
-	// Run the server with the provided routes and a closure that captures the shutdown signal
 	let server_fut = if cfg!(debug_assertions) {
 		let cors = warp::cors()
 			.allow_methods(vec!["POST", "OPTIONS", "GET"])
@@ -87,7 +84,6 @@ async fn main() -> Result<(), NoctowlError> {
 		tokio::task::spawn(server)
 	};
 
-	// Run the server and the shutdown signal listener concurrently
 	let _ = tokio::select! {
     _ = server_fut => println!("Server exited unexpectedly"),
     _ = shutdown_signal => {
