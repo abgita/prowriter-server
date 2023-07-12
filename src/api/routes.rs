@@ -5,7 +5,8 @@ use warp::{Filter, Rejection, Reply};
 
 use crate::accounts::{jwt};
 use crate::api::controllers::{create_document, create_folder, create_project, get_document, get_project, get_projects, update_document};
-use crate::api::controllers::get_document::{get_prev_document, GetDocumentParams};
+use crate::api::controllers::get_document::{get_document_revisions, GetDocumentParams, GetDocumentRevisionsParams};
+use crate::api::controllers::restore_document::{restore_document, RestoreDocumentParams};
 use crate::noctowl::lib::Noctowl;
 
 fn with_noctowl(
@@ -41,7 +42,7 @@ pub fn get_routes(
 		.and(warp::body::json())
 		.and_then(create_document);
 
-	// projects/{project_pid}/docs/{doc_pid}
+	// projects/{project_pid}/docs/{doc_pid}/?u={number}
 	let get_document = warp::path!(String / "docs" / String)
 		.and(warp::post())
 		.and(warp::query::<GetDocumentParams>())
@@ -49,12 +50,21 @@ pub fn get_routes(
 		.and(with_noctowl(noctowl.clone()))
 		.and_then(get_document);
 
-	// projects/{project_pid}/docs/{doc_pid}
-	let get_prev_document = warp::path!(String / "docs" / String / i32)
+	// projects/{project_pid}/docs/{doc_pid}/restore/?u={number}
+	let restore_document = warp::path!(String / "docs" / String / "restore")
 		.and(warp::post())
+		.and(warp::query::<RestoreDocumentParams>())
 		.and(jwt::jwt_auth_filter())
 		.and(with_noctowl(noctowl.clone()))
-		.and_then(get_prev_document);
+		.and_then(restore_document);
+
+	// projects/{project_pid}/docs/{doc_pid}/?o={number}&l={number}
+	let get_document_revisions = warp::path!(String / "docs" / String / "revs")
+		.and(warp::post())
+		.and(warp::query::<GetDocumentRevisionsParams>())
+		.and(jwt::jwt_auth_filter())
+		.and(with_noctowl(noctowl.clone()))
+		.and_then(get_document_revisions);
 
 	let update_document = warp::path!(String / "docs" / String / "update")
 		.and(warp::put())
@@ -85,7 +95,8 @@ pub fn get_routes(
 				.or(create_folder)
 				.or(create_document)
 				.or(get_document)
-				.or(get_prev_document)
+				.or(get_document_revisions)
+				.or(restore_document)
 				.or(update_document)
 				.or(get_project))
 		.or(warp::path("users")

@@ -5,6 +5,7 @@ mod create_folder;
 mod create_document;
 pub mod get_document;
 mod update_document;
+pub mod restore_document;
 
 pub use create_project::create_project;
 pub use get_projects::get_projects;

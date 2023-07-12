@@ -122,7 +122,7 @@ async fn get_doc_state(
 	project_pid: &str,
 	doc_pid: &str,
 ) -> Vec<u8> {
-	let res = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await;
+	let res = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await;
 	let (doc, _) = res.unwrap();
 	doc.unwrap().lock().await.get_doc_state()
 }
@@ -133,7 +133,7 @@ async fn get_doc_json(
 	project_pid: &str,
 	doc_pid: &str,
 ) -> String {
-	let res = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await;
+	let res = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await;
 	let (doc, _) = res.unwrap();
 	doc.unwrap().lock().await.to_string()
 }
@@ -147,7 +147,7 @@ async fn get_base_doc() -> Result<(Arc<Mutex<Document>>, Vec<DocUpdate>), Noctow
 	let project_pid = "p439633";
 	let doc_pid = "a374f61d-5419-4401-b22f-72b58bffbd9a";
 
-	let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await?.0;
+	let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await?.0;
 	let doc = doc.unwrap();
 
 	let updates = noctowl.get_all_document_updates(&user_pid, &project_pid, &doc_pid).await?;
@@ -185,7 +185,7 @@ async fn test_linear_regular() -> Result<(), NoctowlError> {
 			).await?;
 		}
 
-		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await?.0;
+		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await?.0;
 		let doc = doc.unwrap();
 
 		let expected_output = format!(
@@ -283,7 +283,7 @@ async fn test_multithreading_regular() -> Result<(), NoctowlError> {
 			task.await.unwrap();
 		}
 
-		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await?.0;
+		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await?.0;
 		let doc = doc.unwrap();
 
 		let expected_output = format!(
@@ -351,7 +351,7 @@ async fn test_with_real_doc() -> Result<(), NoctowlError> {
 			task.await.unwrap();
 		}
 
-		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await?.0;
+		let doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await?.0;
 		let doc = doc.unwrap();
 
 		let actual_output = format!("{:?}", doc.lock().await.get_doc_state());
@@ -563,7 +563,7 @@ async fn simple_simulation_test() -> Result<(), NoctowlError> {
 
 		// final assertion
 		{
-			let actual_doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None, None).await?.0;
+			let actual_doc = noctowl.get_document(&user_pid, &project_pid, &doc_pid, None).await?.0;
 			let actual_doc = actual_doc.unwrap();
 
 			let actual_output = format!("{:?}", actual_doc.lock().await.get_doc_state());

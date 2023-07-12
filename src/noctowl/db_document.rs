@@ -10,7 +10,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
-use crate::{nlog};
+use crate::nlog;
 use crate::common::utils;
 use crate::noctowl::db_project::does_document_exist;
 use crate::noctowl::db_utils::{create_short_lived_connection_pool, db_exists, get_db_path};
@@ -83,6 +83,13 @@ pub struct DocUpdate {
 	pub snapshot_id: i64,
 	pub created_at: i64,
 	pub update_data: Vec<u8>,
+}
+
+#[derive(sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocUpdateInfo {
+	pub update_id: i64,
+	pub created_at: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -219,9 +226,9 @@ pub async fn create_doc_db_and_insert(
 	// Insert into doc table
 	sqlx::query(
 		r#"
-            INSERT INTO doc (doc_pid, last_modified, latest_snapshot_id, updates_for_current_snapshot)
-            VALUES (?, ?, ?, ?)
-        "#,
+			INSERT INTO doc (doc_pid, last_modified, latest_snapshot_id, updates_for_current_snapshot)
+			VALUES (?, ?, ?, ?)
+		"#,
 	)
 		.bind(doc_pid)
 		.bind(current_timestamp)
@@ -246,68 +253,69 @@ pub async fn create_doc_db_and_insert(
 pub async fn get_doc(
 	doc_db_pool: &Pool<Sqlite>,
 	doc_pid: &str,
-	snapshot_id: &Option<i64>,
-	update_index: &Option<i64>,
+	update_id: &Option<i64>,
 ) -> Result<(DocSnapshot, Option<Vec<DocUpdate>>), NoctowlError> {
 	// Begin a transaction
 	let mut tx = doc_db_pool.begin().await
 		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
 
-	// Get the snapshot snapshot_id or the latest snapshot if snapshot_id is none
-	let snapshot: Option<DocSnapshot> = if snapshot_id.is_none() {
-		sqlx::query_as(
+	// Declare variables
+	let snapshot: DocSnapshot;
+	let updates: Vec<DocUpdate>;
+
+	if let Some(update_id) = update_id {
+		// Get the update
+		let update: DocUpdate = sqlx::query_as("SELECT * FROM updates WHERE update_id = ?")
+			.bind(update_id)
+			.fetch_one(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Error getting update", e))?;
+
+		// Get the snapshot this update is part of
+		snapshot = sqlx::query_as("SELECT * FROM snapshots WHERE snapshot_id = ?")
+			.bind(update.snapshot_id)
+			.fetch_one(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Error getting snapshot", e))?;
+
+		// Get all updates up to and including the provided update_id
+		updates = sqlx::query_as(
 			r#"
-        SELECT * FROM doc
-        INNER JOIN snapshots ON doc.latest_snapshot_id = snapshots.snapshot_id
-        WHERE doc_pid = ?
-        "#,
+				SELECT * FROM updates
+				WHERE snapshot_id = ? AND update_id <= ?
+			"#,
+		)
+			.bind(update.snapshot_id)
+			.bind(update_id)
+			.fetch_all(&mut tx)
+			.await
+			.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?;
+	} else {
+		// Get the latest snapshot
+		snapshot = sqlx::query_as(
+			r#"
+				SELECT * FROM doc
+				INNER JOIN snapshots ON doc.latest_snapshot_id = snapshots.snapshot_id
+				WHERE doc_pid = ?
+			"#,
 		)
 			.bind(doc_pid)
-			.fetch_optional(&mut tx)
+			.fetch_one(&mut tx)
 			.await
-			.map_err(|e| NoctowlError::SqlxError("Error getting latest snapshot", e))?
-	} else {
-		sqlx::query_as("SELECT * FROM snapshots WHERE snapshot_id = ?")
-			.bind(snapshot_id.unwrap())
-			.fetch_optional(&mut tx)
+			.map_err(|e| NoctowlError::SqlxError("Error getting latest snapshot", e))?;
+
+		// Get all updates associated with the latest snapshot
+		updates = sqlx::query_as(
+			r#"
+				SELECT * FROM updates
+				WHERE snapshot_id = ?
+			"#,
+		)
+			.bind(snapshot.snapshot_id)
+			.fetch_all(&mut tx)
 			.await
-			.map_err(|e| NoctowlError::SqlxError("Error getting specific snapshot", e))?
-	};
-
-	if snapshot.is_none() {
-		tx.rollback().await
-			.map_err(|e| NoctowlError::SqlxError("Error rolling back transaction", e))?;
-
-		return Err(NoctowlError::DocumentNotFound("Document with specified snapshot_id not found".to_string()));
+			.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?;
 	}
-
-	let snapshot = snapshot.unwrap();
-
-	// Get associated updates, if any
-	let updates: Vec<DocUpdate> = if update_index.is_none() {
-		sqlx::query_as(
-			r#"
-        SELECT * FROM updates
-        WHERE snapshot_id = ?
-        "#,
-		)
-			.bind(snapshot.snapshot_id)
-			.fetch_all(&mut tx)
-			.await
-			.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?
-	} else {
-		sqlx::query_as(
-			r#"
-        SELECT * FROM updates
-        WHERE snapshot_id = ? AND update_id <= ?
-        "#,
-		)
-			.bind(snapshot.snapshot_id)
-			.bind(update_index.unwrap())
-			.fetch_all(&mut tx)
-			.await
-			.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?
-	};
 
 	tx.commit().await
 		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
@@ -322,17 +330,16 @@ pub async fn get_document(
 	doc_db_pool: &Pool<Sqlite>,
 	docs_cache: &Arc<RwLock<HashMap<String, Arc<Mutex<Document>>>>>,
 	doc_pid: &str,
-	snapshot_id: &Option<i64>,
-	update_index: &Option<i64>,
+	update_id: &Option<i64>,
 ) -> Result<Arc<Mutex<Document>>, NoctowlError> {
-	let entry_key = format!("{}_{}_{}", doc_pid, snapshot_id.unwrap_or(-1), update_index.unwrap_or(-1));
+	let entry_key = format!("{}_{}", doc_pid, update_id.unwrap_or(-1));
 
 	let mut cache = docs_cache.write().await;
 
 	match cache.entry(entry_key) {
 		Entry::Occupied(entry) => Ok(entry.get().clone()),
 		Entry::Vacant(entry) => {
-			let (snapshot, updates) = get_doc(doc_db_pool, doc_pid, snapshot_id, update_index).await?;
+			let (snapshot, updates) = get_doc(doc_db_pool, doc_pid, update_id).await?;
 
 			let doc = Document::new_from_snapshot(
 				doc_pid,
@@ -349,58 +356,18 @@ pub async fn get_document(
 	}
 }
 
-pub async fn get_previous_document(
-	doc_db_pool: &Pool<Sqlite>,
+pub async fn remove_doc_cache(
 	docs_cache: &Arc<RwLock<HashMap<String, Arc<Mutex<Document>>>>>,
 	doc_pid: &str,
-	prev_amount: i32,
-) -> Result<Arc<Mutex<Document>>, NoctowlError> {
-	let mut tx = doc_db_pool.begin().await
-		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
+	update_id: i64,
+) -> Result<(), NoctowlError> {
+	let entry_key = format!("{}_{}", doc_pid, update_id);
 
-	let doc_info: DocInfo = sqlx::query_as("SELECT * FROM doc WHERE doc_pid = ?")
-		.bind(doc_pid)
-		.fetch_one(&mut tx)
-		.await
-		.map_err(|e| NoctowlError::SqlxError("Error getting doc info", e))?;
+	let mut cache = docs_cache.write().await;
 
-	let updates_for_current_snapshot = doc_info.updates_for_current_snapshot as i32;
+	cache.remove(&entry_key);
 
-	let (prev_snap_id, prev_update_index) = if updates_for_current_snapshot > prev_amount {
-		(Some(doc_info.latest_snapshot_id), Some((updates_for_current_snapshot - prev_amount) as i64))
-	} else {
-		let prev_snap_id = if doc_info.latest_snapshot_id > 1 {
-			Some(doc_info.latest_snapshot_id - 1)
-		} else {
-			None
-		};
-
-		let prev_update_index: Option<i64> = sqlx::query_scalar(
-			"SELECT MAX(update_index) FROM updates WHERE snapshot_id = ?"
-		).bind(prev_snap_id.unwrap_or(-1))
-			.fetch_optional(&mut tx).await
-			.map_err(|e| NoctowlError::SqlxError("Error getting latest update index for the previous snapshot", e))?;
-
-		let prev_update_index = if prev_update_index.is_some() {
-			let prev_amount = prev_amount - updates_for_current_snapshot;
-			let prev_update_index = prev_update_index.unwrap();
-
-			if prev_update_index > prev_amount as i64 {
-				Some(prev_update_index - prev_amount as i64)
-			} else {
-				Some(prev_update_index)
-			}
-		} else {
-			None
-		};
-
-		(prev_snap_id, prev_update_index)
-	};
-
-	tx.commit().await
-		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
-
-	get_document(doc_db_pool, docs_cache, doc_pid, &prev_snap_id, &prev_update_index).await
+	return Ok(());
 }
 
 pub async fn save_doc_update(
@@ -416,8 +383,8 @@ pub async fn save_doc_update(
 
 	let (latest_snapshot_id, updates_for_current_snapshot): (i64, i32) = sqlx::query_as(
 		r#"
-        SELECT latest_snapshot_id, updates_for_current_snapshot FROM doc
-        WHERE doc_pid = ?
+			SELECT latest_snapshot_id, updates_for_current_snapshot FROM doc
+			WHERE doc_pid = ?
     "#,
 	)
 		.bind(&doc_pid)
@@ -429,9 +396,9 @@ pub async fn save_doc_update(
 	{
 		sqlx::query(
 			r#"
-            INSERT INTO updates (snapshot_id, created_at, update_data)
-            VALUES (?, ?, ?)
-        "#,
+				INSERT INTO updates (snapshot_id, created_at, update_data)
+				VALUES (?, ?, ?)
+			"#,
 		)
 			.bind(latest_snapshot_id)
 			.bind(current_timestamp)
@@ -451,7 +418,7 @@ pub async fn save_doc_update(
         UPDATE doc
         SET updates_for_current_snapshot = ?, last_modified = ?
         WHERE doc_pid = ?
-    "#,
+   	 "#,
 		)
 			.bind(updates_for_current_snapshot + 1)
 			.bind(current_timestamp)
@@ -466,9 +433,9 @@ pub async fn save_doc_update(
 
 		let res = sqlx::query(
 			r#"
-            INSERT INTO snapshots (created_at, snapshot_data)
-            VALUES (?, ?)
-        "#,
+				INSERT INTO snapshots (created_at, snapshot_data)
+				VALUES (?, ?)
+			"#,
 		)
 			.bind(current_timestamp)
 			.bind(snapshot_data)
@@ -484,7 +451,7 @@ pub async fn save_doc_update(
         UPDATE doc
         SET latest_snapshot_id = ?, updates_for_current_snapshot = ?, last_modified = ?
         WHERE doc_pid = ?
-    "#,
+    	"#,
 		)
 			.bind(new_latest_snapshot_id)
 			.bind(new_updates_for_current_snapshot)
@@ -494,6 +461,54 @@ pub async fn save_doc_update(
 			.await
 			.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
 	}
+
+	tx.commit().await
+		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
+
+	Ok(())
+}
+
+pub async fn save_restored_version(
+	doc_db_pool: &Pool<Sqlite>,
+	doc_pid: &str,
+	full_doc_state: &Vec<u8>,
+) -> Result<(), NoctowlError> {
+	let mut tx = doc_db_pool.begin().await
+		.map_err(|e| NoctowlError::SqlxError("Error beginning transaction", e))?;
+
+	let current_timestamp = utils::current_timestamp_secs() as i64;
+
+	let snapshot_data = full_doc_state;
+
+	let res = sqlx::query(
+		r#"
+			INSERT INTO snapshots (created_at, snapshot_data)
+			VALUES (?, ?)
+		"#,
+	)
+		.bind(current_timestamp)
+		.bind(snapshot_data)
+		.execute(&mut tx)
+		.await
+		.map_err(|e| NoctowlError::SqlxError("Error inserting into snapshots table", e))?;
+
+	let new_latest_snapshot_id = res.last_insert_rowid();
+	let new_updates_for_current_snapshot = 0;
+
+	sqlx::query(
+		r#"
+			UPDATE doc
+			SET latest_snapshot_id = ?, updates_for_current_snapshot = ?, last_modified = ?
+			WHERE doc_pid = ?
+    "#,
+	)
+		.bind(new_latest_snapshot_id)
+		.bind(new_updates_for_current_snapshot)
+		.bind(current_timestamp)
+		.bind(&doc_pid)
+		.execute(&mut tx)
+		.await
+		.map_err(|e| NoctowlError::SqlxError("Error updating doc table", e))?;
 
 	tx.commit().await
 		.map_err(|e| NoctowlError::SqlxError("Error committing transaction", e))?;
@@ -524,7 +539,6 @@ pub async fn process_update(
 		&doc_db_pool,
 		&docs_cache,
 		doc_pid,
-		&None,
 		&None,
 	).await?;
 
@@ -595,9 +609,9 @@ pub async fn get_snapshots_between_timestamps(
 	// Get the snapshots
 	let snapshots: Vec<(i64, i64)> = sqlx::query_as(
 		r#"
-        SELECT snapshot_id, created_at FROM snapshots
-        WHERE created_at >= ? AND created_at <= ?
-        "#,
+			SELECT snapshot_id, created_at FROM snapshots
+			WHERE created_at >= ? AND created_at <= ?
+		"#,
 	)
 		.bind(timestamp_since)
 		.bind(timestamp_until)
@@ -716,4 +730,25 @@ pub async fn get_all_updates(
 		.map_err(|e| NoctowlError::SqlxError("Failed to get all updates", e))?;
 
 	Ok(rows)
+}
+
+pub async fn get_updates_with_offset_limit(
+	doc_db_pool: &Pool<Sqlite>,
+	offset: i64,
+	limit: i64,
+) -> Result<Vec<DocUpdateInfo>, NoctowlError> {
+	let updates: Vec<DocUpdateInfo> = sqlx::query_as(
+		r#"
+			SELECT update_id, created_at FROM updates
+			ORDER BY update_id DESC
+			LIMIT ? OFFSET ?
+		"#,
+	)
+		.bind(limit)
+		.bind(offset)
+		.fetch_all(doc_db_pool)
+		.await
+		.map_err(|e| NoctowlError::SqlxError("Error getting updates", e))?;
+
+	Ok(updates)
 }

@@ -20,6 +20,7 @@ pub enum NoctowlStatus {
 	ProjectNotFound,
 	DocumentAlreadyExists,
 	DocumentNotFound,
+	ErrorRestoringDocument,
 }
 
 pub enum NoctowlError {
@@ -35,13 +36,13 @@ pub enum NoctowlError {
 impl Display for NoctowlError {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		match self {
-			NoctowlError::Error(s, e) => write!(f, "{}: {}", s, e),
-			NoctowlError::IoError(s) => write!(f, "{}", s),
-			NoctowlError::ProjectNotFound(s) => write!(f, "Project not found: {}", s),
-			NoctowlError::DocumentNotFound(s) => write!(f, "Document not found: {}", s),
-			NoctowlError::DocumentUpdateFailed(s) => write!(f, "Error updating document: {}", s),
-			NoctowlError::SqlxError(s, e) => write!(f, "{}: {}", s, e),
-			NoctowlError::SqlxErrorClosingConnection(e) => write!(f, "Error closing connection: {}", e),
+			NoctowlError::Error(s, e) => writeln!(f, "{}: {}", s, e),
+			NoctowlError::IoError(s) => writeln!(f, "{}", s),
+			NoctowlError::ProjectNotFound(s) => writeln!(f, "Project not found: {}", s),
+			NoctowlError::DocumentNotFound(s) => writeln!(f, "Document not found: {}", s),
+			NoctowlError::DocumentUpdateFailed(s) => writeln!(f, "Error updating document: {}", s),
+			NoctowlError::SqlxError(s, e) => writeln!(f, "{}: {}", s, e),
+			NoctowlError::SqlxErrorClosingConnection(e) => writeln!(f, "Error closing connection: {}", e),
 		}
 	}
 }

@@ -10,7 +10,7 @@ use tokio::time::Instant;
 
 use crate::common::utils;
 use crate::noctowl::{NoctowlError, NoctowlStatus};
-use crate::noctowl::db_document::{DocUpdate, get_all_updates, get_doc_db_connection, get_document, get_previous_document, process_update};
+use crate::noctowl::db_document::{DocUpdate, DocUpdateInfo, get_all_updates, get_doc_db_connection, get_document, get_updates_with_offset_limit, process_update, remove_doc_cache, save_restored_version};
 use crate::noctowl::db_main::{create_project, get_project_by_pid, get_projects_by_user_pid, load_main_db, Project};
 use crate::noctowl::db_project::{create_document, DocRow, FolderRow, get_project_content, get_project_db_connection, insert_folder};
 use crate::noctowl::document::{Document, YrsUpdateStatus};
@@ -40,7 +40,7 @@ pub struct Noctowl {
 pub mod constants {
 	use crate::noctowl::db_project::ROOT_FOLDER_ID;
 
-	pub const PROJECT_PID_LENGTH: usize = 6;
+	pub const PROJECT_PID_LENGTH: usize = 7;
 	pub const DOC_PID_LENGTH: usize = 36;
 	pub const ICON_STRING_MAX_LENGTH: usize = 2;
 	pub const MIN_FOLDER_ID: i32 = ROOT_FOLDER_ID;
@@ -243,8 +243,7 @@ impl Noctowl {
 		user_pid: &str,
 		project_pid: &str,
 		doc_pid: &str,
-		snapshot_id: Option<i64>,
-		update_index: Option<i64>,
+		update_id: Option<i64>,
 	) -> Result<(Option<Arc<Mutex<Document>>>, NoctowlStatus), NoctowlError> {
 		let project_connection = get_project_db_connection(
 			&self.main_db,
@@ -268,8 +267,7 @@ impl Noctowl {
 			&doc_connection,
 			&self.docs_cache,
 			&doc_pid,
-			&snapshot_id,
-			&update_index,
+			&update_id,
 		).await {
 			Ok(doc) => Ok((Some(doc), NoctowlStatus::Ok)),
 			Err(e) => match e {
@@ -279,13 +277,13 @@ impl Noctowl {
 		}
 	}
 
-	pub async fn get_prev_document(
+	pub async fn restore_document(
 		&self,
 		user_pid: &str,
 		project_pid: &str,
 		doc_pid: &str,
-		prev_amount: i32,
-	) -> Result<(Option<Arc<Mutex<Document>>>, NoctowlStatus), NoctowlError> {
+		update_id: i64,
+	) -> Result<((), NoctowlStatus), NoctowlError> {
 		let project_connection = get_project_db_connection(
 			&self.main_db,
 			&self.connection_pools,
@@ -304,13 +302,73 @@ impl Noctowl {
 			&user_pid,
 		).await?;
 
-		match get_previous_document(
+		let doc_at_update_id = get_document(
 			&doc_connection,
 			&self.docs_cache,
 			&doc_pid,
-			prev_amount
+			&Some(update_id),
+		).await?;
+
+		let state = {
+			let document = doc_at_update_id.lock().await;
+
+			document.get_doc_state()
+		};
+
+		match save_restored_version(
+			&doc_connection,
+			&doc_pid,
+			&state
 		).await {
-			Ok(doc) => Ok((Some(doc), NoctowlStatus::Ok)),
+			Ok(_) => {
+				// remove the latest version of the document from the cache
+				remove_doc_cache(
+					&self.docs_cache,
+					&doc_pid,
+					-1
+				).await?;
+
+				return Ok(((), NoctowlStatus::Ok));
+			},
+			Err(e) => match e {
+				NoctowlError::DocumentNotFound(_) => Ok(((), NoctowlStatus::ErrorRestoringDocument)),
+				_ => Err(e),
+			}
+		}
+	}
+
+	pub async fn get_updates_with_offset_limit(
+		&self,
+		user_pid: &str,
+		project_pid: &str,
+		doc_pid: &str,
+		offset: i64,
+		limit: i64,
+	) -> Result<(Option<Vec<DocUpdateInfo>>, NoctowlStatus), NoctowlError> {
+		let project_connection = get_project_db_connection(
+			&self.main_db,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&user_pid,
+			&project_pid,
+		).await?;
+
+		let doc_connection = get_doc_db_connection(
+			&project_connection,
+			&self.connection_pools,
+			&self.access_map,
+			&self.options.users_dir,
+			&doc_pid,
+			&user_pid,
+		).await?;
+
+		match get_updates_with_offset_limit(
+			&doc_connection,
+			offset,
+			limit
+		).await {
+			Ok(updates) => Ok((Some(updates), NoctowlStatus::Ok)),
 			Err(e) => match e {
 				NoctowlError::DocumentNotFound(_) => Ok((None, NoctowlStatus::DocumentNotFound)),
 				_ => Err(e),
